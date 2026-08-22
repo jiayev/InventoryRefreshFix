@@ -4,7 +4,7 @@ Runtime profiling and safe optimizations for Skyrim's expensive full inventory-l
 
 The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu or rebuilds the complete Scaleform item list. Each log entry separates item-list rebuilding, indexed inventory materialization, bottom-bar updates, player 3D rebuilding, and other message-handling work.
 
-`lib/commonlibsse` is pinned to [`63b63ff`](https://github.com/jiayev/CommonLibSSE/commit/63b63ff01), which includes the reviewed native inventory-materialization helpers and inventory-update state names.
+`lib/commonlibsse` is pinned to [`1066ead`](https://github.com/jiayev/CommonLibSSE/commit/1066ead1b), which contains the inventory-specific refresh and materialization APIs based on CommonLibSSE `dev`.
 
 ## Current scope
 
