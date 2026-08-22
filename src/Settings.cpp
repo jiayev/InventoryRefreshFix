@@ -12,7 +12,6 @@ namespace Settings
 
 		bool g_enableInventoryEnumeration = true;
 		bool g_validateInventoryEnumeration = true;
-		bool g_enableRefreshCoalescing = false;
 		bool g_enableIncrementalInvalidation = false;
 	}
 
@@ -28,11 +27,6 @@ namespace Settings
 			L"bValidateInventoryEnumeration",
 			1,
 			kConfigPath) != 0;
-		g_enableRefreshCoalescing = GetPrivateProfileIntW(
-			L"General",
-			L"bEnableRefreshCoalescing",
-			0,
-			kConfigPath) != 0;
 		g_enableIncrementalInvalidation = GetPrivateProfileIntW(
 			L"General",
 			L"bEnableIncrementalInvalidation",
@@ -41,11 +35,10 @@ namespace Settings
 
 		SKSE::log::info(
 			"Inventory refresh optimizations (bulk enumeration: {} / validation: {}; "
-			"incremental invalidation: {}; coalescing: {})",
+			"incremental invalidation: {})",
 			g_enableInventoryEnumeration ? "enabled" : "disabled",
 			g_validateInventoryEnumeration ? "enabled" : "disabled",
-			g_enableIncrementalInvalidation ? "enabled" : "disabled",
-			g_enableRefreshCoalescing ? "enabled" : "disabled");
+			g_enableIncrementalInvalidation ? "enabled" : "disabled");
 	}
 
 	bool IsInventoryEnumerationEnabled()
@@ -56,11 +49,6 @@ namespace Settings
 	bool IsInventoryEnumerationValidationEnabled()
 	{
 		return g_validateInventoryEnumeration;
-	}
-
-	bool IsRefreshCoalescingEnabled()
-	{
-		return g_enableRefreshCoalescing;
 	}
 
 	bool IsIncrementalInvalidationEnabled()

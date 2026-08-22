@@ -2,9 +2,9 @@
 
 Runtime profiling and safe optimizations for Skyrim's expensive full inventory-list refreshes.
 
-The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu or rebuilds the complete Scaleform item list. Each log entry separates item-list rebuilding, indexed inventory materialization, bottom-bar updates, player 3D rebuilding, and other message-handling work. It also includes an experimental coalescing path for redundant complete updates.
+The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu or rebuilds the complete Scaleform item list. Each log entry separates item-list rebuilding, indexed inventory materialization, bottom-bar updates, player 3D rebuilding, and other message-handling work.
 
-`lib/commonlibsse` is pinned to [`68c00e2`](https://github.com/jiayev/CommonLibSSE/commit/68c00e26f), which includes the reviewed native inventory-materialization helpers.
+`lib/commonlibsse` is pinned to [`63b63ff`](https://github.com/jiayev/CommonLibSSE/commit/63b63ff01), which includes the reviewed native inventory-materialization helpers and inventory-update state names.
 
 ## Current scope
 
@@ -26,12 +26,6 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 Set `bEnableIncrementalInvalidation=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the incremental UI path. Before rebuilding the native list, the plugin records the already materialized Scaleform form IDs, category flags, and entry objects without re-reading expiring native inventory descriptors. SkyUI-compatible lists recognize objects retained by the game's partial-update path and match newly materialized objects to prior processed entries using the stable form, display text, and filter flag. If the opening movie processed its entries before raw snapshots could be attached, a complete rebuild may also match entries with identical per-position topology and stable native refresh fields. Entries whose native primitive data is unchanged reuse the processed object; changed and unmatched entries remain raw for normal SkyUI processing. The standard SkyUI item-card processor retains its full-list callback semantics but naturally skips cached entries, while deterministic icon and property processors run only for changed entries. When item topology and every active filter and sort input remain unchanged, the plugin replaces stale filtered-enumeration references with the current entries and updates the visible renderers without rebuilding and sorting the complete filtered list. The original selection and highlight notifications are restored explicitly. The vanilla list retains its separate topology-checked visible-renderer path. Missing movie interfaces, unreliable cache state, changed filter or sort inputs, nonstandard processor chains, and unsupported menu layouts automatically use the original full invalidation.
 
 This option targets redundant ActionScript item-data processing, filtering, and sorting while retaining the original full refresh as the correctness fallback. It remains disabled until inventory opening, equipping, favoriting, consuming, dropping, picking up, renaming, enchanting, searching, changing sort modes, and custom inventory-menu movies have been exercised.
-
-## Experimental coalescing
-
-Set `bEnableRefreshCoalescing=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the experimental path. It consumes adjacent complete-update messages, schedules one UI task, reacquires the still-open `InventoryMenu`, and calls the game's `RefreshItemList` and `RefreshBottomBar` helpers once.
-
-The default is `0` because the runtime data confirms redundant rebuilds, but not yet every possible update ordering. This setting should be tested with inventory opening, equipping and unequipping, consuming items, crafting, trading, picking up items, and scripted inventory changes.
 
 ### Requirements
 

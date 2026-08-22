@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <cwchar>
@@ -1556,66 +1555,6 @@ namespace InventoryMenuHook
 			static inline GetInventoryItemAt_t _original = nullptr;
 		};
 
-		class FullRefreshQueue
-		{
-		public:
-			static bool Queue()
-			{
-				_requestCount.fetch_add(1, std::memory_order_relaxed);
-				if (_queued.exchange(true, std::memory_order_acq_rel)) {
-					return true;
-				}
-
-				const auto* task = SKSE::GetTaskInterface();
-				if (!task) {
-					_queued.store(false, std::memory_order_release);
-					_requestCount.fetch_sub(1, std::memory_order_relaxed);
-					return false;
-				}
-
-				task->AddUITask([] {
-					const auto requestCount = _requestCount.exchange(0, std::memory_order_acq_rel);
-					_queued.store(false, std::memory_order_release);
-
-					auto* ui = RE::UI::GetSingleton();
-					if (!ui) {
-						return;
-					}
-
-					auto menu = ui->GetMenu<RE::InventoryMenu>();
-					if (!menu) {
-						return;
-					}
-
-					RefreshProfile      profile;
-					RefreshProfileScope profileScope{ profile };
-					profile.menu = menu.get();
-					profile.allowIncrementalInvalidation = Settings::IsIncrementalInvalidationEnabled();
-					if (profile.allowIncrementalInvalidation) {
-						profile.incrementalInvalidationStatus = "full/not attempted";
-					}
-					const auto          started = std::chrono::steady_clock::now();
-					const auto          itemListStarted = std::chrono::steady_clock::now();
-					if (profile.allowIncrementalInvalidation) {
-						CaptureItemTopology(profile, menu.get());
-					}
-					menu->RefreshItemList();
-					profile.itemListTime += std::chrono::steady_clock::now() - itemListStarted;
-					const auto bottomBarStarted = std::chrono::steady_clock::now();
-					menu->RefreshBottomBar();
-					profile.bottomBarTime += std::chrono::steady_clock::now() - bottomBarStarted;
-					LogRefresh("Coalesced", menu.get(), std::chrono::steady_clock::now() - started, profile);
-					SKSE::log::debug("Coalesced {} complete inventory updates", requestCount);
-				});
-
-				return true;
-			}
-
-		private:
-			static inline std::atomic_bool     _queued{ false };
-			static inline std::atomic_uint32_t _requestCount{ 0 };
-		};
-
 		class ProcessMessageHook
 		{
 		public:
@@ -1626,10 +1565,6 @@ namespace InventoryMenuHook
 
 				if (!isFullRefresh && !isMenuOpen) {
 					return _original(a_menu, a_message);
-				}
-
-				if (isFullRefresh && Settings::IsRefreshCoalescingEnabled() && FullRefreshQueue::Queue()) {
-					return RE::UI_MESSAGE_RESULTS::kHandled;
 				}
 
 				RefreshProfile      profile;

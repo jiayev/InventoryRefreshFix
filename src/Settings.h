@@ -6,6 +6,5 @@ namespace Settings
 
 	[[nodiscard]] bool IsInventoryEnumerationEnabled();
 	[[nodiscard]] bool IsInventoryEnumerationValidationEnabled();
-	[[nodiscard]] bool IsRefreshCoalescingEnabled();
 	[[nodiscard]] bool IsIncrementalInvalidationEnabled();
 }
