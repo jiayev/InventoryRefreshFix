@@ -4,7 +4,7 @@ Runtime profiling and optimization groundwork for Skyrim's expensive full invent
 
 The profiler measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list. Each log entry separates the time spent in Skyrim's indexed inventory materialization from the remaining native-item, sorting, and Scaleform work. It also includes an experimental coalescing path for redundant complete updates.
 
-`lib/commonlibsse` is pinned to [`69a1455`](https://github.com/jiayev/CommonLibSSE/commit/69a1455), which includes the reviewed inventory refresh interfaces used for the next implementation stage.
+`lib/commonlibsse` is pinned to [`c3c4449`](https://github.com/jiayev/CommonLibSSE/commit/c3c444980), which includes the reviewed inventory refresh interfaces used for the next implementation stage.
 
 ## Current scope
 
