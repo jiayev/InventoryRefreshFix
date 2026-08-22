@@ -190,8 +190,11 @@ namespace InventoryMenuHook
 				}
 			}
 
-			if (!itemList->root.Invoke("UpdateList")) {
-				a_profile.incrementalInvalidationStatus = "full/visible update failed";
+			// Revalidate the item list itself so its filter array, scroll bounds, and
+			// selection remain coherent. The expensive outer category rescan is the only
+			// part skipped by this path.
+			if (!itemList->root.Invoke("InvalidateData")) {
+				a_profile.incrementalInvalidationStatus = "full/item invalidation failed";
 				return false;
 			}
 
