@@ -15,6 +15,12 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 - Separates Scaleform array clearing, per-entry `PushBack`, and `InvalidateListData` from the remaining native materialization and sorting work.
 - Retains profiling-only behavior by default.
 
+## Experimental incremental invalidation
+
+Set `bEnableIncrementalInvalidation=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the incremental UI path. Before rebuilding the native list, the plugin records the sorted item identities and category flags. If they are unchanged at invalidation time, it refreshes only the visible item renderers and reproduces the original selection event. Item additions, removals, reordering, category changes, missing movie interfaces, and unsupported menu layouts automatically use the original `InvalidateListData` callback.
+
+This option targets the expensive ActionScript-wide category/filter rescan while retaining the original full refresh as the correctness fallback. It remains disabled until inventory opening, equipping, favoriting, consuming, dropping, picking up, renaming, enchanting, and custom inventory-menu movies have been exercised.
+
 ## Experimental coalescing
 
 Set `bEnableRefreshCoalescing=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the experimental path. It consumes adjacent complete-update messages, schedules one UI task, reacquires the still-open `InventoryMenu`, and calls the game's `RefreshItemList` and `RefreshBottomBar` helpers once.
@@ -88,5 +94,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.3.0`
+- Version: `0.4.0`
 - Author: `Jiaye`

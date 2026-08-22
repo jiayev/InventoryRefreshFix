@@ -7,7 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <memory>
 #include <string_view>
+#include <vector>
 
 namespace InventoryMenuHook
 {
@@ -21,6 +23,16 @@ namespace InventoryMenuHook
 		using PushBack_t = bool (*)(RE::GFxValue::ObjectInterface*, void*, const RE::GFxValue&);
 
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
+		constexpr auto kInventoryListsTwoPanels = 2;
+		constexpr auto kInventoryListsTransitioningToTwoPanels = 5;
+
+		struct ItemTopologyEntry
+		{
+			const RE::TESBoundObject* object;
+			std::uint32_t             filterFlag;
+
+			friend bool operator==(const ItemTopologyEntry&, const ItemTopologyEntry&) = default;
+		};
 
 		struct RefreshProfile
 		{
@@ -33,6 +45,11 @@ namespace InventoryMenuHook
 			std::chrono::steady_clock::duration player3DTime{};
 			std::uint32_t                       enumerationCalls{ 0 };
 			std::uint32_t                       scaleformPushCalls{ 0 };
+			RE::InventoryMenu*                  menu{ nullptr };
+			std::vector<ItemTopologyEntry>      itemTopology;
+			bool                                itemTopologyCaptured{ false };
+			bool                                allowIncrementalInvalidation{ false };
+			bool                                usedIncrementalInvalidation{ false };
 		};
 
 		thread_local RefreshProfile* g_activeRefreshProfile = nullptr;
@@ -65,6 +82,118 @@ namespace InventoryMenuHook
 			std::memcpy(&displacement, reinterpret_cast<const void*>(a_callSite + 1), sizeof(displacement));
 			return static_cast<std::uintptr_t>(
 				static_cast<std::intptr_t>(a_callSite + 5) + displacement);
+		}
+
+		void CaptureItemTopology(RefreshProfile& a_profile, RE::InventoryMenu* a_menu)
+		{
+			a_profile.itemTopology.clear();
+			a_profile.itemTopologyCaptured = false;
+
+			if (!a_menu || !a_menu->itemList) {
+				return;
+			}
+
+			const auto& items = a_menu->itemList->items;
+			a_profile.itemTopology.reserve(items.size());
+			for (auto* item : items) {
+				if (!item || !item->data.objDesc || !item->data.objDesc->object) {
+					a_profile.itemTopology.clear();
+					return;
+				}
+
+				a_profile.itemTopology.push_back({
+					item->data.objDesc->object,
+					item->data.GetFilterFlag()
+				});
+			}
+
+			a_profile.itemTopologyCaptured = true;
+		}
+
+		bool HasMatchingItemTopology(const RefreshProfile& a_profile)
+		{
+			if (!a_profile.itemTopologyCaptured || !a_profile.menu || !a_profile.menu->itemList) {
+				return false;
+			}
+
+			const auto& items = a_profile.menu->itemList->items;
+			if (items.size() != a_profile.itemTopology.size()) {
+				return false;
+			}
+
+			for (std::size_t i = 0; i < items.size(); ++i) {
+				auto* item = items[i];
+				if (!item || !item->data.objDesc ||
+				    ItemTopologyEntry{ item->data.objDesc->object, item->data.GetFilterFlag() } !=
+						a_profile.itemTopology[i]) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		bool TryIncrementalInvalidation(RefreshProfile& a_profile)
+		{
+			if (!a_profile.allowIncrementalInvalidation || !HasMatchingItemTopology(a_profile)) {
+				return false;
+			}
+
+			auto* menu = a_profile.menu;
+			auto* itemList = menu->itemList;
+			if (!menu->uiMovie || !itemList->root.IsDisplayObject()) {
+				return false;
+			}
+
+			// RefreshItemList repopulates the same ActionScript array object. When its
+			// identity, order, and filter flags are unchanged, the filterer and category
+			// availability computed by the previous full invalidation remain valid.
+			RE::GFxValue inventoryLists;
+			RE::GFxValue currentState;
+			RE::GFxValue selectedIndex;
+			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) ||
+			    !inventoryLists.GetMember("iCurrentState", std::addressof(currentState)) ||
+			    !currentState.IsNumber() ||
+			    !itemList->root.GetMember("selectedIndex", std::addressof(selectedIndex)) ||
+			    !selectedIndex.IsNumber()) {
+				return false;
+			}
+
+			const auto state = currentState.GetSInt();
+			RE::GFxValue event;
+			if (state == kInventoryListsTwoPanels || state == kInventoryListsTransitioningToTwoPanels) {
+				menu->uiMovie->CreateObject(std::addressof(event));
+				const RE::GFxValue eventType{
+					state == kInventoryListsTwoPanels ? "itemHighlightChange" : "showItemsList"
+				};
+				if (!event.IsObject() ||
+				    !event.SetMember("type", eventType) ||
+				    !event.SetMember("index", selectedIndex)) {
+					return false;
+				}
+			}
+
+			if (!itemList->root.Invoke("UpdateList")) {
+				return false;
+			}
+
+			// Preserve the state-dependent selection notification at the end of the
+			// original InventoryLists.InvalidateListData callback.
+			bool selectionUpdated = false;
+			if (state == kInventoryListsTwoPanels || state == kInventoryListsTransitioningToTwoPanels) {
+				const std::array args{ event };
+				selectionUpdated = inventoryLists.Invoke("dispatchEvent", args);
+			} else {
+				const RE::GFxValue noSelection{ -1 };
+				selectionUpdated = itemList->root.SetMember("selectedIndex", noSelection);
+			}
+
+			if (!selectionUpdated) {
+				return false;
+			}
+
+			a_profile.usedIncrementalInvalidation = true;
+			return true;
 		}
 
 		bool IsFullItemListRefresh(const RE::UIMessage& a_message)
@@ -115,7 +244,7 @@ namespace InventoryMenuHook
 				SKSE::log::info(
 					"{} inventory message: {} entries in {:.3f} ms "
 					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
-					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms; internal other: {:.3f} ms]; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {}; internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
@@ -127,6 +256,7 @@ namespace InventoryMenuHook
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
 					scaleformInvalidateMilliseconds,
+					a_profile.usedIncrementalInvalidation ? "incremental" : "full",
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -135,7 +265,7 @@ namespace InventoryMenuHook
 				SKSE::log::debug(
 					"{} inventory message: {} entries in {:.3f} ms "
 					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
-					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms; internal other: {:.3f} ms]; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {}; internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
@@ -147,6 +277,7 @@ namespace InventoryMenuHook
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
 					scaleformInvalidateMilliseconds,
+					a_profile.usedIncrementalInvalidation ? "incremental" : "full",
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -160,6 +291,9 @@ namespace InventoryMenuHook
 			static void RefreshItemListThunk(RE::InventoryMenu* a_menu)
 			{
 				const auto started = std::chrono::steady_clock::now();
+				if (g_activeRefreshProfile && g_activeRefreshProfile->allowIncrementalInvalidation) {
+					CaptureItemTopology(*g_activeRefreshProfile, a_menu);
+				}
 				_refreshItemListOriginal(a_menu);
 
 				if (g_activeRefreshProfile) {
@@ -304,7 +438,9 @@ namespace InventoryMenuHook
 				}
 
 				const auto started = std::chrono::steady_clock::now();
-				_invalidateOriginal(a_movieView, a_methodName, a_args);
+				if (!TryIncrementalInvalidation(*profile)) {
+					_invalidateOriginal(a_movieView, a_methodName, a_args);
+				}
 #else
 			static void InvalidateThunk(RE::ItemList* a_itemList)
 			{
@@ -314,7 +450,9 @@ namespace InventoryMenuHook
 				}
 
 				const auto started = std::chrono::steady_clock::now();
-				_invalidateOriginal(a_itemList);
+				if (!TryIncrementalInvalidation(*profile)) {
+					_invalidateOriginal(a_itemList);
+				}
 #endif
 
 				profile->scaleformInvalidateTime += std::chrono::steady_clock::now() - started;
@@ -500,8 +638,13 @@ namespace InventoryMenuHook
 
 					RefreshProfile      profile;
 					RefreshProfileScope profileScope{ profile };
+					profile.menu = menu.get();
+					profile.allowIncrementalInvalidation = Settings::IsIncrementalInvalidationEnabled();
 					const auto          started = std::chrono::steady_clock::now();
 					const auto          itemListStarted = std::chrono::steady_clock::now();
+					if (profile.allowIncrementalInvalidation) {
+						CaptureItemTopology(profile, menu.get());
+					}
 					menu->RefreshItemList();
 					profile.itemListTime += std::chrono::steady_clock::now() - itemListStarted;
 					const auto bottomBarStarted = std::chrono::steady_clock::now();
@@ -537,6 +680,9 @@ namespace InventoryMenuHook
 
 				RefreshProfile      profile;
 				RefreshProfileScope profileScope{ profile };
+				profile.menu = a_menu;
+				profile.allowIncrementalInvalidation =
+					isFullRefresh && Settings::IsIncrementalInvalidationEnabled();
 				const auto          started = std::chrono::steady_clock::now();
 				const auto result = _original(a_menu, a_message);
 				LogRefresh(isMenuOpen ? "Open" : "Full", a_menu, std::chrono::steady_clock::now() - started, profile);
