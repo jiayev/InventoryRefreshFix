@@ -49,7 +49,7 @@ namespace InventoryMenuHook
 			std::vector<ItemTopologyEntry>      itemTopology;
 			bool                                itemTopologyCaptured{ false };
 			bool                                allowIncrementalInvalidation{ false };
-			bool                                usedIncrementalInvalidation{ false };
+			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
 		};
 
 		thread_local RefreshProfile* g_activeRefreshProfile = nullptr;
@@ -110,14 +110,16 @@ namespace InventoryMenuHook
 			a_profile.itemTopologyCaptured = true;
 		}
 
-		bool HasMatchingItemTopology(const RefreshProfile& a_profile)
+		bool HasMatchingItemTopology(RefreshProfile& a_profile)
 		{
 			if (!a_profile.itemTopologyCaptured || !a_profile.menu || !a_profile.menu->itemList) {
+				a_profile.incrementalInvalidationStatus = "full/no topology snapshot";
 				return false;
 			}
 
 			const auto& items = a_profile.menu->itemList->items;
 			if (items.size() != a_profile.itemTopology.size()) {
+				a_profile.incrementalInvalidationStatus = "full/item count changed";
 				return false;
 			}
 
@@ -126,6 +128,7 @@ namespace InventoryMenuHook
 				if (!item || !item->data.objDesc ||
 				    ItemTopologyEntry{ item->data.objDesc->object, item->data.GetFilterFlag() } !=
 						a_profile.itemTopology[i]) {
+					a_profile.incrementalInvalidationStatus = "full/item topology changed";
 					return false;
 				}
 			}
@@ -135,13 +138,17 @@ namespace InventoryMenuHook
 
 		bool TryIncrementalInvalidation(RefreshProfile& a_profile)
 		{
-			if (!a_profile.allowIncrementalInvalidation || !HasMatchingItemTopology(a_profile)) {
+			if (!a_profile.allowIncrementalInvalidation) {
+				return false;
+			}
+			if (!HasMatchingItemTopology(a_profile)) {
 				return false;
 			}
 
 			auto* menu = a_profile.menu;
 			auto* itemList = menu->itemList;
 			if (!menu->uiMovie || !itemList->root.IsDisplayObject()) {
+				a_profile.incrementalInvalidationStatus = "full/movie unavailable";
 				return false;
 			}
 
@@ -151,11 +158,20 @@ namespace InventoryMenuHook
 			RE::GFxValue inventoryLists;
 			RE::GFxValue currentState;
 			RE::GFxValue selectedIndex;
-			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) ||
-			    !inventoryLists.GetMember("iCurrentState", std::addressof(currentState)) ||
-			    !currentState.IsNumber() ||
-			    !itemList->root.GetMember("selectedIndex", std::addressof(selectedIndex)) ||
+			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
+			    !menu->root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
+				a_profile.incrementalInvalidationStatus = "full/inventory lists unavailable";
+				return false;
+			}
+			if ((!inventoryLists.GetMember("iCurrentState", std::addressof(currentState)) &&
+			     !inventoryLists.GetMember("currentState", std::addressof(currentState))) ||
+			    !currentState.IsNumber()) {
+				a_profile.incrementalInvalidationStatus = "full/list state unavailable";
+				return false;
+			}
+			if (!itemList->root.GetMember("selectedIndex", std::addressof(selectedIndex)) ||
 			    !selectedIndex.IsNumber()) {
+				a_profile.incrementalInvalidationStatus = "full/selection unavailable";
 				return false;
 			}
 
@@ -169,11 +185,13 @@ namespace InventoryMenuHook
 				if (!event.IsObject() ||
 				    !event.SetMember("type", eventType) ||
 				    !event.SetMember("index", selectedIndex)) {
+					a_profile.incrementalInvalidationStatus = "full/event creation failed";
 					return false;
 				}
 			}
 
 			if (!itemList->root.Invoke("UpdateList")) {
+				a_profile.incrementalInvalidationStatus = "full/visible update failed";
 				return false;
 			}
 
@@ -189,10 +207,11 @@ namespace InventoryMenuHook
 			}
 
 			if (!selectionUpdated) {
+				a_profile.incrementalInvalidationStatus = "full/selection update failed";
 				return false;
 			}
 
-			a_profile.usedIncrementalInvalidation = true;
+			a_profile.incrementalInvalidationStatus = "incremental";
 			return true;
 		}
 
@@ -256,7 +275,7 @@ namespace InventoryMenuHook
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
 					scaleformInvalidateMilliseconds,
-					a_profile.usedIncrementalInvalidation ? "incremental" : "full",
+					a_profile.incrementalInvalidationStatus,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -277,7 +296,7 @@ namespace InventoryMenuHook
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
 					scaleformInvalidateMilliseconds,
-					a_profile.usedIncrementalInvalidation ? "incremental" : "full",
+					a_profile.incrementalInvalidationStatus,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -640,6 +659,9 @@ namespace InventoryMenuHook
 					RefreshProfileScope profileScope{ profile };
 					profile.menu = menu.get();
 					profile.allowIncrementalInvalidation = Settings::IsIncrementalInvalidationEnabled();
+					if (profile.allowIncrementalInvalidation) {
+						profile.incrementalInvalidationStatus = "full/not attempted";
+					}
 					const auto          started = std::chrono::steady_clock::now();
 					const auto          itemListStarted = std::chrono::steady_clock::now();
 					if (profile.allowIncrementalInvalidation) {
@@ -683,6 +705,9 @@ namespace InventoryMenuHook
 				profile.menu = a_menu;
 				profile.allowIncrementalInvalidation =
 					isFullRefresh && Settings::IsIncrementalInvalidationEnabled();
+				if (profile.allowIncrementalInvalidation) {
+					profile.incrementalInvalidationStatus = "full/not attempted";
+				}
 				const auto          started = std::chrono::steady_clock::now();
 				const auto result = _original(a_menu, a_message);
 				LogRefresh(isMenuOpen ? "Open" : "Full", a_menu, std::chrono::steady_clock::now() - started, profile);
