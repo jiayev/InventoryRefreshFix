@@ -1,5 +1,6 @@
 #include "InventoryMenuHook.h"
 
+#include "InventoryEnumeration.h"
 #include "Settings.h"
 #include "pch.h"
 
@@ -58,6 +59,7 @@ namespace InventoryMenuHook
 
 		struct RefreshProfile
 		{
+			InventoryEnumeration::Session       inventoryEnumeration;
 			std::chrono::steady_clock::duration enumerationTime{};
 			std::chrono::steady_clock::duration itemListTime{};
 			std::chrono::steady_clock::duration scaleformClearTime{};
@@ -82,6 +84,7 @@ namespace InventoryMenuHook
 			bool                                scaleformEntriesCaptured{ false };
 			bool                                usedScaleformPositionFallback{ false };
 			bool                                allowIncrementalInvalidation{ false };
+			std::string_view                    inventoryEnumerationStatus{ "original/disabled" };
 			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
 		};
 
@@ -1159,7 +1162,7 @@ namespace InventoryMenuHook
 			if (a_elapsed >= kSlowRefreshThreshold) {
 				SKSE::log::info(
 					"{} inventory message: {} entries in {:.3f} ms "
-					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
+					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} requests / {}; GFx clear: {:.3f} ms; "
 					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
 					"[processors: {:.3f} ms (item card: {:.3f} ms; changed entries: {:.3f} ms); "
 					"enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
@@ -1171,6 +1174,7 @@ namespace InventoryMenuHook
 					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
+					a_profile.inventoryEnumerationStatus,
 					scaleformClearMilliseconds,
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
@@ -1189,7 +1193,7 @@ namespace InventoryMenuHook
 			} else {
 				SKSE::log::debug(
 					"{} inventory message: {} entries in {:.3f} ms "
-					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
+					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} requests / {}; GFx clear: {:.3f} ms; "
 					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
 					"[processors: {:.3f} ms (item card: {:.3f} ms; changed entries: {:.3f} ms); "
 					"enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
@@ -1201,6 +1205,7 @@ namespace InventoryMenuHook
 					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
+					a_profile.inventoryEnumerationStatus,
 					scaleformClearMilliseconds,
 					scaleformPushMilliseconds,
 					a_profile.scaleformPushCalls,
@@ -1502,9 +1507,15 @@ namespace InventoryMenuHook
 				}
 
 				const auto started = std::chrono::steady_clock::now();
-				auto* result = _original(a_changes, a_index);
+				auto* result = profile->inventoryEnumeration.Get(
+					a_changes,
+					a_index,
+					_original,
+					Settings::IsInventoryEnumerationEnabled(),
+					Settings::IsInventoryEnumerationValidationEnabled());
 				profile->enumerationTime += std::chrono::steady_clock::now() - started;
 				++profile->enumerationCalls;
+				profile->inventoryEnumerationStatus = profile->inventoryEnumeration.GetStatus();
 
 				return result;
 			}

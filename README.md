@@ -1,10 +1,10 @@
 # InventoryRefreshFix
 
-Runtime profiling and optimization groundwork for Skyrim's expensive full inventory-list refreshes.
+Runtime profiling and safe optimizations for Skyrim's expensive full inventory-list refreshes.
 
 The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu or rebuilds the complete Scaleform item list. Each log entry separates item-list rebuilding, indexed inventory materialization, bottom-bar updates, player 3D rebuilding, and other message-handling work. It also includes an experimental coalescing path for redundant complete updates.
 
-`lib/commonlibsse` is pinned to [`c3c4449`](https://github.com/jiayev/CommonLibSSE/commit/c3c444980), which includes the reviewed inventory refresh interfaces used for the next implementation stage.
+`lib/commonlibsse` is pinned to [`68c00e2`](https://github.com/jiayev/CommonLibSSE/commit/68c00e26f), which includes the reviewed native inventory-materialization helpers.
 
 ## Current scope
 
@@ -12,8 +12,14 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 - Times menu opening and player-targeted `kInventoryUpdate` messages with a null `updateObj`, the two paths that perform a complete item-list rebuild.
 - Instruments the exact `ProcessMessage` call sites for item-list rebuilding, bottom-bar updates, and player 3D rebuilding on Skyrim SE and AE.
 - Instruments both `InventoryChanges::GetInventoryItemAt` call sites inside `InventoryMenu::RefreshItemList` and reports their aggregate duration and call count.
+- Replaces the indexed near-quadratic inventory materializer with one refresh-scoped linear pass. The first sequence in a game session is compared row-for-row with the original implementation before subsequent refreshes rely on it.
 - Separates Scaleform array clearing, per-entry `PushBack`, and `InvalidateListData` from the remaining native materialization and sorting work.
-- Retains profiling-only behavior by default.
+
+## Native inventory enumeration
+
+`bEnableInventoryEnumeration=1` builds the complete logical inventory-row sequence once per `RefreshItemList` call and serves the game's indexed requests from that sequence. It preserves base-container order, duplicate CNTO aggregation, change-only entries, split stacks, residual aggregate stacks, leveled-item handling, and the original ExtraDataList pointer order.
+
+`bValidateInventoryEnumeration=1` keeps the correctness guard enabled. The first bulk sequence of each game session is compared against every row produced by the native indexed implementation using the base-object pointer, count, and ordered ExtraDataList pointers. A mismatch is logged and disables bulk enumeration for the rest of the session. The validation refresh intentionally retains the original O(N²) cost; later refreshes use the linear materializer.
 
 ## Experimental incremental invalidation
 
@@ -94,5 +100,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.4.0`
+- Version: `0.5.0`
 - Author: `Jiaye`
