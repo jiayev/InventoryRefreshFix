@@ -174,7 +174,7 @@ namespace InventoryMenuHook
 					const auto requestCount = _requestCount.exchange(0, std::memory_order_acq_rel);
 					_queued.store(false, std::memory_order_release);
 
-					const auto* ui = RE::UI::GetSingleton();
+					auto* ui = RE::UI::GetSingleton();
 					if (!ui) {
 						return;
 					}
