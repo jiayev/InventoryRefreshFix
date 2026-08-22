@@ -1,15 +1,16 @@
 # InventoryRefreshFix
 
-Runtime profiling groundwork for Skyrim's expensive full inventory-list refreshes.
+Runtime profiling and optimization groundwork for Skyrim's expensive full inventory-list refreshes.
 
-The profiler measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list, and writes the rebuilt entry count and duration to the SKSE log when the call takes at least 5 ms. It also includes an experimental coalescing path for redundant complete updates.
+The profiler measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list. Each log entry separates the time spent in Skyrim's indexed inventory materialization from the remaining native-item, sorting, and Scaleform work. It also includes an experimental coalescing path for redundant complete updates.
 
-`lib/commonlibsse` is pinned to [`ccf72cf`](https://github.com/jiayev/CommonLibSSE/commit/ccf72cf744639f8d42da2f84337838d2c1f67af5), which adds the reviewed inventory refresh interfaces used for the next implementation stage.
+`lib/commonlibsse` is pinned to [`69a1455`](https://github.com/jiayev/CommonLibSSE/commit/69a1455), which includes the reviewed inventory refresh interfaces used for the next implementation stage.
 
 ## Current scope
 
 - Hooks `InventoryMenu::ProcessMessage` after SKSE's `kDataLoaded` event.
-- Times only `kInventoryUpdate` messages with a null `updateObj`, the game path that performs a complete item-list rebuild.
+- Times menu opening and `kInventoryUpdate` messages with a null `updateObj`, the two paths that perform a complete item-list rebuild.
+- Instruments both `InventoryChanges::GetInventoryItemAt` call sites inside `InventoryMenu::RefreshItemList` and reports their aggregate duration and call count.
 - Retains profiling-only behavior by default.
 
 ## Experimental coalescing

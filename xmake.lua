@@ -3,7 +3,7 @@ includes("lib/commonlibsse")
 
 -- set project constants
 set_project("InventoryRefreshFix")
-set_version("0.2.0")
+set_version("0.3.0")
 set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")
@@ -18,7 +18,7 @@ target("InventoryRefreshFix")
     add_rules("commonlibsse.plugin", {
         name = "InventoryRefreshFix",
         author = "Jiaye",
-        description = "Coalesces expensive Skyrim inventory-list refreshes and records refresh timing."
+        description = "Profiles Skyrim inventory refresh phases and experiments with safe refresh optimizations."
     })
 
     -- add src files
