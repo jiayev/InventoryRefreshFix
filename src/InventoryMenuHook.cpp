@@ -24,7 +24,6 @@ namespace InventoryMenuHook
 
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
 		constexpr auto kInventoryListsTwoPanels = 2;
-		constexpr auto kInventoryListsTransitioningToTwoPanels = 5;
 
 		struct ItemTopologyEntry
 		{
@@ -175,42 +174,47 @@ namespace InventoryMenuHook
 				return false;
 			}
 
-			const auto state = currentState.GetSInt();
-			RE::GFxValue event;
-			if (state == kInventoryListsTwoPanels || state == kInventoryListsTransitioningToTwoPanels) {
-				menu->uiMovie->CreateObject(std::addressof(event));
-				const RE::GFxValue eventType{
-					state == kInventoryListsTwoPanels ? "itemHighlightChange" : "showItemsList"
-				};
-				if (!event.IsObject() ||
-				    !event.SetMember("type", eventType) ||
-				    !event.SetMember("index", selectedIndex)) {
-					a_profile.incrementalInvalidationStatus = "full/event creation failed";
-					return false;
-				}
-			}
-
-			// Revalidate the item list itself so its filter array, scroll bounds, and
-			// selection remain coherent. The expensive outer category rescan is the only
-			// part skipped by this path.
-			if (!itemList->root.Invoke("InvalidateData")) {
-				a_profile.incrementalInvalidationStatus = "full/item invalidation failed";
+			if (currentState.GetSInt() != kInventoryListsTwoPanels) {
+				a_profile.incrementalInvalidationStatus = "full/unsupported list state";
 				return false;
 			}
 
-			// Preserve the state-dependent selection notification at the end of the
-			// original InventoryLists.InvalidateListData callback.
-			bool selectionUpdated = false;
-			if (state == kInventoryListsTwoPanels || state == kInventoryListsTransitioningToTwoPanels) {
-				const std::array args{ event };
-				selectionUpdated = inventoryLists.Invoke("dispatchEvent", args);
-			} else {
-				const RE::GFxValue noSelection{ -1 };
-				selectionUpdated = itemList->root.SetMember("selectedIndex", noSelection);
+			const auto selection = selectedIndex.GetSInt();
+			if (selection < 0 || static_cast<std::size_t>(selection) >= a_profile.itemTopology.size()) {
+				a_profile.incrementalInvalidationStatus = "full/no active selection";
+				return false;
 			}
 
-			if (!selectionUpdated) {
-				a_profile.incrementalInvalidationStatus = "full/selection update failed";
+			RE::GFxValue event;
+			menu->uiMovie->CreateObject(std::addressof(event));
+			if (!event.IsObject() ||
+			    !event.SetMember("type", RE::GFxValue{ "itemHighlightChange" }) ||
+			    !event.SetMember("index", selectedIndex)) {
+				a_profile.incrementalInvalidationStatus = "full/event creation failed";
+				return false;
+			}
+
+			// The array identity, order, filter flags, and count are unchanged, so the
+			// existing filter and scroll bounds remain valid. Redraw only the visible
+			// renderers instead of rescanning every entry in InvalidateData.
+			if (!itemList->root.Invoke("UpdateList")) {
+				a_profile.incrementalInvalidationStatus = "full/item update failed";
+				return false;
+			}
+
+			// UpdateList reuses the entry clips under the stationary cursor. Toggle the
+			// selection through the public setter so the selected renderer is rearmed for
+			// another mouse press, then reproduce the original highlight notification.
+			const RE::GFxValue noSelection{ -1 };
+			if (!itemList->root.SetMember("selectedIndex", noSelection) ||
+			    !itemList->root.SetMember("selectedIndex", selectedIndex)) {
+				a_profile.incrementalInvalidationStatus = "full/selection restore failed";
+				return false;
+			}
+
+			const std::array args{ event };
+			if (!inventoryLists.Invoke("dispatchEvent", args)) {
+				a_profile.incrementalInvalidationStatus = "full/highlight dispatch failed";
 				return false;
 			}
 
