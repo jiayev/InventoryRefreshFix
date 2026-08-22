@@ -14,12 +14,17 @@ namespace InventoryMenuHook
 	{
 		using ProcessMessage_t = RE::UI_MESSAGE_RESULTS (*)(RE::InventoryMenu*, RE::UIMessage&);
 		using GetInventoryItemAt_t = RE::InventoryEntryData* (*)(RE::InventoryChanges*, std::int32_t);
+		using RefreshMenu_t = void (*)(RE::InventoryMenu*);
+		using UpdatePlayer3D_t = void (*)(RE::AIProcess*, RE::Actor*);
 
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
 
 		struct RefreshProfile
 		{
 			std::chrono::steady_clock::duration enumerationTime{};
+			std::chrono::steady_clock::duration itemListTime{};
+			std::chrono::steady_clock::duration bottomBarTime{};
+			std::chrono::steady_clock::duration player3DTime{};
 			std::uint32_t                       enumerationCalls{ 0 };
 		};
 
@@ -43,15 +48,32 @@ namespace InventoryMenuHook
 			RefreshProfile* _previous;
 		};
 
+		std::uintptr_t GetCallTarget(std::uintptr_t a_callSite)
+		{
+			if (*reinterpret_cast<const std::uint8_t*>(a_callSite) != 0xE8) {
+				return 0;
+			}
+
+			std::int32_t displacement;
+			std::memcpy(&displacement, reinterpret_cast<const void*>(a_callSite + 1), sizeof(displacement));
+			return static_cast<std::uintptr_t>(
+				static_cast<std::intptr_t>(a_callSite + 5) + displacement);
+		}
+
 		bool IsFullItemListRefresh(const RE::UIMessage& a_message)
 		{
 			if (a_message.type != RE::UI_MESSAGE_TYPE::kInventoryUpdate || !a_message.data) {
 				return false;
 			}
 
-			// Skyrim rebuilds the complete list only when no individual item is supplied.
 			const auto* data = static_cast<const RE::InventoryUpdateData*>(a_message.data);
-			return data->updateObj == nullptr;
+			auto* player = RE::PlayerCharacter::GetSingleton();
+
+			// InventoryMenu ignores updates for other references. A matching update with no
+			// individual item takes the complete-list branch in ProcessMessage.
+			return player &&
+			       data->inventoryRef == player->GetHandle().native_handle() &&
+			       data->updateObj == nullptr;
 		}
 
 		void LogRefresh(
@@ -64,30 +86,144 @@ namespace InventoryMenuHook
 			const auto elapsedMilliseconds = std::chrono::duration<double, std::milli>(a_elapsed).count();
 			const auto enumerationMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.enumerationTime).count();
-			const auto remainingMilliseconds = elapsedMilliseconds - enumerationMilliseconds;
+			const auto itemListMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.itemListTime).count();
+			const auto bottomBarMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.bottomBarTime).count();
+			const auto player3DMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.player3DTime).count();
+			const auto otherMilliseconds =
+				elapsedMilliseconds - itemListMilliseconds - bottomBarMilliseconds - player3DMilliseconds;
 
 			if (a_elapsed >= kSlowRefreshThreshold) {
 				SKSE::log::info(
-					"{} inventory refresh: {} entries in {:.3f} ms "
-					"(enumeration: {:.3f} ms / {} calls, remaining: {:.3f} ms)",
+					"{} inventory message: {} entries in {:.3f} ms "
+					"(item list: {:.3f} ms; enumeration: {:.3f} ms / {} calls; "
+					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
 					elapsedMilliseconds,
+					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
-					remainingMilliseconds);
+					bottomBarMilliseconds,
+					player3DMilliseconds,
+					otherMilliseconds);
 			} else {
 				SKSE::log::debug(
-					"{} inventory refresh: {} entries in {:.3f} ms "
-					"(enumeration: {:.3f} ms / {} calls, remaining: {:.3f} ms)",
+					"{} inventory message: {} entries in {:.3f} ms "
+					"(item list: {:.3f} ms; enumeration: {:.3f} ms / {} calls; "
+					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
 					elapsedMilliseconds,
+					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
-					remainingMilliseconds);
+					bottomBarMilliseconds,
+					player3DMilliseconds,
+					otherMilliseconds);
 			}
 		}
+
+		class RefreshPhaseHook
+		{
+		public:
+			static void RefreshItemListThunk(RE::InventoryMenu* a_menu)
+			{
+				const auto started = std::chrono::steady_clock::now();
+				_refreshItemListOriginal(a_menu);
+
+				if (g_activeRefreshProfile) {
+					g_activeRefreshProfile->itemListTime += std::chrono::steady_clock::now() - started;
+				}
+			}
+
+			static void RefreshBottomBarThunk(RE::InventoryMenu* a_menu)
+			{
+				const auto started = std::chrono::steady_clock::now();
+				_refreshBottomBarOriginal(a_menu);
+
+				if (g_activeRefreshProfile) {
+					g_activeRefreshProfile->bottomBarTime += std::chrono::steady_clock::now() - started;
+				}
+			}
+
+			static void UpdatePlayer3DThunk(RE::AIProcess* a_process, RE::Actor* a_player)
+			{
+				const auto started = std::chrono::steady_clock::now();
+				_updatePlayer3DOriginal(a_process, a_player);
+
+				if (g_activeRefreshProfile) {
+					g_activeRefreshProfile->player3DTime += std::chrono::steady_clock::now() - started;
+				}
+			}
+
+			static bool Install()
+			{
+				REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_InventoryMenu[0] };
+				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
+				REL::Relocation<std::uintptr_t> refreshBottomBar{ RELOCATION_ID(50986, 51865) };
+				REL::Relocation<std::uintptr_t> updatePlayer3D{ RELOCATION_ID(38404, 39395) };
+
+				const auto processMessage =
+					*reinterpret_cast<const std::uintptr_t*>(vtable.address() + 4 * sizeof(std::uintptr_t));
+
+#ifdef SKYRIM_SUPPORT_AE
+				constexpr std::ptrdiff_t kOpenItemListOffset = 0x21B;
+				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x223;
+				constexpr std::ptrdiff_t kFullItemListOffset = 0xB2B;
+				constexpr std::ptrdiff_t kFullBottomBarOffset = 0xB33;
+				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0xB5D;
+#else
+				constexpr std::ptrdiff_t kOpenItemListOffset = 0x134;
+				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x13C;
+				constexpr std::ptrdiff_t kFullItemListOffset = 0x785;
+				constexpr std::ptrdiff_t kFullBottomBarOffset = 0x78D;
+				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0x7B7;
+#endif
+
+				const auto openItemListCall = processMessage + kOpenItemListOffset;
+				const auto openBottomBarCall = processMessage + kOpenBottomBarOffset;
+				const auto fullItemListCall = processMessage + kFullItemListOffset;
+				const auto fullBottomBarCall = processMessage + kFullBottomBarOffset;
+				const auto fullPlayer3DCall = processMessage + kFullPlayer3DOffset;
+
+				if (GetCallTarget(openItemListCall) != refreshItemList.address() ||
+				    GetCallTarget(fullItemListCall) != refreshItemList.address() ||
+				    GetCallTarget(openBottomBarCall) != refreshBottomBar.address() ||
+				    GetCallTarget(fullBottomBarCall) != refreshBottomBar.address() ||
+				    GetCallTarget(fullPlayer3DCall) != updatePlayer3D.address()) {
+					SKSE::log::critical("Inventory refresh phase call-site validation failed; detailed profiling disabled");
+					return false;
+				}
+
+				auto& trampoline = SKSE::GetTrampoline();
+				_refreshItemListOriginal = reinterpret_cast<RefreshMenu_t>(
+					trampoline.write_call<5>(openItemListCall, RefreshItemListThunk));
+				const auto fullItemListOriginal = reinterpret_cast<RefreshMenu_t>(
+					trampoline.write_call<5>(fullItemListCall, RefreshItemListThunk));
+				_refreshBottomBarOriginal = reinterpret_cast<RefreshMenu_t>(
+					trampoline.write_call<5>(openBottomBarCall, RefreshBottomBarThunk));
+				const auto fullBottomBarOriginal = reinterpret_cast<RefreshMenu_t>(
+					trampoline.write_call<5>(fullBottomBarCall, RefreshBottomBarThunk));
+				_updatePlayer3DOriginal = reinterpret_cast<UpdatePlayer3D_t>(
+					trampoline.write_call<5>(fullPlayer3DCall, UpdatePlayer3DThunk));
+
+				if (_refreshItemListOriginal != fullItemListOriginal ||
+				    _refreshBottomBarOriginal != fullBottomBarOriginal) {
+					SKSE::log::critical("Inventory refresh phase call sites have different targets");
+					return false;
+				}
+
+				return true;
+			}
+
+		private:
+			static inline RefreshMenu_t _refreshItemListOriginal = nullptr;
+			static inline RefreshMenu_t _refreshBottomBarOriginal = nullptr;
+			static inline UpdatePlayer3D_t _updatePlayer3DOriginal = nullptr;
+		};
 
 		class InventoryEnumerationHook
 		{
@@ -138,18 +274,6 @@ namespace InventoryMenuHook
 			}
 
 		private:
-			static std::uintptr_t GetCallTarget(std::uintptr_t a_callSite)
-			{
-				if (*reinterpret_cast<const std::uint8_t*>(a_callSite) != 0xE8) {
-					return 0;
-				}
-
-				std::int32_t displacement;
-				std::memcpy(&displacement, reinterpret_cast<const void*>(a_callSite + 1), sizeof(displacement));
-				return static_cast<std::uintptr_t>(
-					static_cast<std::intptr_t>(a_callSite + 5) + displacement);
-			}
-
 			static inline GetInventoryItemAt_t _original = nullptr;
 		};
 
@@ -187,8 +311,12 @@ namespace InventoryMenuHook
 					RefreshProfile      profile;
 					RefreshProfileScope profileScope{ profile };
 					const auto          started = std::chrono::steady_clock::now();
+					const auto          itemListStarted = std::chrono::steady_clock::now();
 					menu->RefreshItemList();
+					profile.itemListTime += std::chrono::steady_clock::now() - itemListStarted;
+					const auto bottomBarStarted = std::chrono::steady_clock::now();
 					menu->RefreshBottomBar();
+					profile.bottomBarTime += std::chrono::steady_clock::now() - bottomBarStarted;
 					LogRefresh("Coalesced", menu.get(), std::chrono::steady_clock::now() - started, profile);
 					SKSE::log::debug("Coalesced {} complete inventory updates", requestCount);
 				});
@@ -243,9 +371,12 @@ namespace InventoryMenuHook
 
 	void Install()
 	{
-		SKSE::AllocTrampoline(64);
+		SKSE::AllocTrampoline(256);
+		const auto phaseProfilingInstalled = RefreshPhaseHook::Install();
 		InventoryEnumerationHook::Install();
 		ProcessMessageHook::Install();
-		SKSE::log::info("Inventory menu refresh phase profiler installed");
+		SKSE::log::info(
+			"Inventory menu refresh phase profiler installed ({})",
+			phaseProfilingInstalled ? "detailed phases enabled" : "message timing only");
 	}
 }
