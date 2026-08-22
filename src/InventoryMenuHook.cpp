@@ -24,6 +24,7 @@ namespace InventoryMenuHook
 
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
 		constexpr auto kInventoryListsTwoPanels = 2;
+		constexpr auto kInventoryListsTransitioningToTwoPanels = 5;
 
 		struct ItemTopologyEntry
 		{
@@ -174,21 +175,42 @@ namespace InventoryMenuHook
 				return false;
 			}
 
-			if (currentState.GetSInt() != kInventoryListsTwoPanels) {
-				a_profile.incrementalInvalidationStatus = "full/unsupported list state";
-				return false;
-			}
-
 			const auto selection = selectedIndex.GetSInt();
 			if (selection < 0 || static_cast<std::size_t>(selection) >= a_profile.itemTopology.size()) {
 				a_profile.incrementalInvalidationStatus = "full/no active selection";
 				return false;
 			}
 
+			const auto state = currentState.GetSInt();
+			const char* eventType = nullptr;
+			switch (state) {
+			case kInventoryListsTwoPanels:
+				eventType = "itemHighlightChange";
+				break;
+			case kInventoryListsTransitioningToTwoPanels:
+				eventType = "showItemsList";
+				break;
+			case 0:
+				a_profile.incrementalInvalidationStatus = "full/no panels";
+				return false;
+			case 1:
+				a_profile.incrementalInvalidationStatus = "full/one panel";
+				return false;
+			case 3:
+				a_profile.incrementalInvalidationStatus = "full/transitioning to no panels";
+				return false;
+			case 4:
+				a_profile.incrementalInvalidationStatus = "full/transitioning to one panel";
+				return false;
+			default:
+				a_profile.incrementalInvalidationStatus = "full/unknown list state";
+				return false;
+			}
+
 			RE::GFxValue event;
 			menu->uiMovie->CreateObject(std::addressof(event));
 			if (!event.IsObject() ||
-			    !event.SetMember("type", RE::GFxValue{ "itemHighlightChange" }) ||
+			    !event.SetMember("type", RE::GFxValue{ eventType }) ||
 			    !event.SetMember("index", selectedIndex)) {
 				a_profile.incrementalInvalidationStatus = "full/event creation failed";
 				return false;
