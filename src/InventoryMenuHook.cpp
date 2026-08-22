@@ -3,6 +3,7 @@
 #include "Settings.h"
 #include "pch.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <cwchar>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +30,7 @@ namespace InventoryMenuHook
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
 		constexpr auto kInventoryListsTwoPanels = 2;
 		constexpr auto kInventoryListsTransitioningToTwoPanels = 5;
+		constexpr auto kSkyUIInventoryListsShowPanel = 1;
 		constexpr auto kNativeSnapshotMember = "__InventoryRefreshFixNativeSnapshot";
 		constexpr std::array kNativeIdentityMembers{ "formId", "text", "filterFlag" };
 
@@ -56,6 +59,9 @@ namespace InventoryMenuHook
 			std::chrono::steady_clock::duration scaleformClearTime{};
 			std::chrono::steady_clock::duration scaleformPushTime{};
 			std::chrono::steady_clock::duration scaleformInvalidateTime{};
+			std::chrono::steady_clock::duration scaleformProcessorTime{};
+			std::chrono::steady_clock::duration scaleformEnumerationTime{};
+			std::chrono::steady_clock::duration scaleformRendererTime{};
 			std::chrono::steady_clock::duration bottomBarTime{};
 			std::chrono::steady_clock::duration player3DTime{};
 			std::uint32_t                       enumerationCalls{ 0 };
@@ -64,10 +70,23 @@ namespace InventoryMenuHook
 			RE::InventoryMenu*                  menu{ nullptr };
 			std::vector<ItemTopologyEntry>      itemTopology;
 			std::vector<RE::GFxValue>           scaleformEntries;
+			std::vector<std::size_t>            scaleformPreviousIndices;
 			bool                                itemTopologyCaptured{ false };
 			bool                                scaleformEntriesCaptured{ false };
 			bool                                allowIncrementalInvalidation{ false };
 			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
+		};
+
+		struct SkyUIEntryMemberSnapshot
+		{
+			RE::GFxValue value;
+			bool         exists{ false };
+		};
+
+		struct SkyUIEnumerationSnapshot
+		{
+			std::vector<std::string>                           memberNames;
+			std::vector<std::vector<SkyUIEntryMemberSnapshot>> entryMembers;
 		};
 
 		enum class SkyUIEntryCacheResult
@@ -382,6 +401,7 @@ namespace InventoryMenuHook
 				a_profile.incrementalInvalidationStatus = "full/native and Scaleform counts differ";
 				return SkyUIEntryCacheResult::kFailed;
 			}
+			a_profile.scaleformPreviousIndices.assign(entryCount, a_profile.scaleformEntries.size());
 
 			std::vector<RE::GFxValue> newEntries;
 			newEntries.reserve(entryCount);
@@ -472,6 +492,7 @@ namespace InventoryMenuHook
 				}
 
 				usedOldEntries[matchingIndex] = 1;
+				a_profile.scaleformPreviousIndices[i] = matchingIndex;
 				auto& oldEntry = a_profile.scaleformEntries[matchingIndex];
 				if (exactObjectMatch) {
 					if (!IsProcessedSkyUIEntry(oldEntry, newTopology.filterFlag)) {
@@ -513,12 +534,322 @@ namespace InventoryMenuHook
 			}
 
 			// SkyUI's first data processor uses skyui_itemDataProcessed as its item-card
-			// cache key. Reusing only unchanged objects lets the original invalidation process
-			// changed entries from scratch while preserving its filtering, sorting, category,
-			// selection, and custom-processor behavior.
+			// cache key. Reusing unchanged objects avoids rebuilding their item-card data;
+			// changed entries remain raw so the processor can extend them normally.
 			a_profile.scaleformChangedEntries = changedEntries;
 			a_profile.incrementalInvalidationStatus = "cached entries";
 			return SkyUIEntryCacheResult::kPrepared;
+		}
+
+		bool RunSkyUIDataProcessors(
+			RefreshProfile& a_profile,
+			const RE::GFxValue& a_dataProcessors)
+		{
+			auto* itemList = a_profile.menu->itemList;
+			auto& entryList = itemList->entryList;
+			RE::GFxValue undefined;
+			for (std::uint32_t i = 0; i < entryList.GetArraySize(); ++i) {
+				RE::GFxValue entry;
+				if (!entryList.GetElement(i, std::addressof(entry)) || !entry.IsObject() ||
+				    !entry.SetMember("itemIndex", RE::GFxValue{ i }) ||
+				    !entry.SetMember("clipIndex", undefined) ||
+				    !entry.SetMember("filteredIndex", undefined)) {
+					return false;
+				}
+			}
+
+			const auto started = std::chrono::steady_clock::now();
+			const std::array args{ itemList->root };
+			for (std::uint32_t i = 0; i < a_dataProcessors.GetArraySize(); ++i) {
+				RE::GFxValue processor;
+				if (!a_dataProcessors.GetElement(i, std::addressof(processor)) || !processor.IsObject() ||
+				    !processor.Invoke("processList", args)) {
+					return false;
+				}
+			}
+			a_profile.scaleformProcessorTime += std::chrono::steady_clock::now() - started;
+
+			return true;
+		}
+
+		bool CaptureSkyUIEnumerationSnapshot(
+			const RefreshProfile& a_profile,
+			const RE::GFxValue& a_listEnumeration,
+			SkyUIEnumerationSnapshot& a_snapshot)
+		{
+			RE::GFxValue filterChain;
+			if (!a_listEnumeration.GetMember("_filterChain", std::addressof(filterChain)) ||
+			    !filterChain.IsArray() || filterChain.GetArraySize() != 3) {
+				return false;
+			}
+
+			RE::GFxValue typeFilter;
+			RE::GFxValue nameFilter;
+			RE::GFxValue sortFilter;
+			if (!filterChain.GetElement(0, std::addressof(typeFilter)) || !typeFilter.IsObject() ||
+			    !filterChain.GetElement(1, std::addressof(nameFilter)) || !nameFilter.IsObject() ||
+			    !filterChain.GetElement(2, std::addressof(sortFilter)) || !sortFilter.IsObject()) {
+				return false;
+			}
+
+			RE::GFxValue itemFilter;
+			RE::GFxValue filterText;
+			RE::GFxValue sortAttributes;
+			if (!typeFilter.GetMember("_itemFilter", std::addressof(itemFilter)) || !itemFilter.IsNumber() ||
+			    !nameFilter.GetMember("_filterText", std::addressof(filterText)) || !filterText.IsString() ||
+			    !sortFilter.GetMember("_sortAttributes", std::addressof(sortAttributes)) ||
+			    !sortAttributes.IsArray()) {
+				return false;
+			}
+
+			a_snapshot.memberNames = { "filterFlag", "enabled" };
+			if (filterText.GetString()[0] != '\0') {
+				a_snapshot.memberNames.emplace_back("text");
+			}
+			for (std::uint32_t attributeIndex = 0;
+			     attributeIndex < sortAttributes.GetArraySize();
+			     ++attributeIndex) {
+				RE::GFxValue attribute;
+				if (!sortAttributes.GetElement(attributeIndex, std::addressof(attribute)) ||
+				    !attribute.IsString()) {
+					return false;
+				}
+
+				const auto* name = attribute.GetString();
+				if (std::find(a_snapshot.memberNames.begin(), a_snapshot.memberNames.end(), name) ==
+				    a_snapshot.memberNames.end()) {
+					a_snapshot.memberNames.emplace_back(name);
+				}
+			}
+
+			// Data processors may update entries the native refresh did not replace. Snapshot
+			// every member that controls filter membership or ordering before running them.
+			const auto entryCount = a_profile.menu->itemList->entryList.GetArraySize();
+			a_snapshot.entryMembers.resize(entryCount);
+			for (std::uint32_t index = 0; index < entryCount; ++index) {
+				if (index >= a_profile.scaleformPreviousIndices.size()) {
+					return false;
+				}
+
+				const auto previousIndex = a_profile.scaleformPreviousIndices[index];
+				if (previousIndex >= a_profile.scaleformEntries.size()) {
+					return false;
+				}
+				const auto& oldEntry = a_profile.scaleformEntries[previousIndex];
+				auto& members = a_snapshot.entryMembers[index];
+				members.resize(a_snapshot.memberNames.size());
+				for (std::size_t memberIndex = 0; memberIndex < a_snapshot.memberNames.size(); ++memberIndex) {
+					auto& member = members[memberIndex];
+					member.exists = oldEntry.GetMember(
+						a_snapshot.memberNames[memberIndex].c_str(), std::addressof(member.value));
+					if (member.exists && !IsPrimitiveValue(member.value)) {
+						return false;
+					}
+				}
+			}
+
+			return true;
+		}
+
+		bool HasMatchingSkyUIEnumerationState(
+			const RefreshProfile& a_profile,
+			const SkyUIEnumerationSnapshot& a_snapshot)
+		{
+			const auto& entryList = a_profile.menu->itemList->entryList;
+			if (entryList.GetArraySize() != a_snapshot.entryMembers.size()) {
+				return false;
+			}
+
+			for (std::uint32_t index = 0; index < entryList.GetArraySize(); ++index) {
+				RE::GFxValue entry;
+				if (!entryList.GetElement(index, std::addressof(entry)) || !entry.IsObject()) {
+					return false;
+				}
+
+				const auto& members = a_snapshot.entryMembers[index];
+				for (std::size_t memberIndex = 0; memberIndex < a_snapshot.memberNames.size(); ++memberIndex) {
+					RE::GFxValue currentValue;
+					const bool currentExists = entry.GetMember(
+						a_snapshot.memberNames[memberIndex].c_str(), std::addressof(currentValue));
+					const auto& previous = members[memberIndex];
+					if (currentExists != previous.exists ||
+					    (currentExists &&
+					     (!IsPrimitiveValue(currentValue) ||
+					      !ArePrimitiveValuesEqual(previous.value, currentValue)))) {
+						return false;
+					}
+				}
+			}
+
+			return true;
+		}
+
+		bool PatchSkyUIFilteredEnumeration(
+			RefreshProfile& a_profile,
+			const RE::GFxValue& a_listEnumeration)
+		{
+			RE::GFxValue filteredData;
+			if (!a_listEnumeration.GetMember("_filteredData", std::addressof(filteredData)) ||
+			    !filteredData.IsArray()) {
+				return false;
+			}
+
+			const auto started = std::chrono::steady_clock::now();
+			auto& entryList = a_profile.menu->itemList->entryList;
+			// FilteredEnumeration retains object references from its previous invalidation.
+			// Translate each old entry index through the cache match before replacing it.
+			std::vector<std::size_t> currentIndicesByPrevious(
+				a_profile.scaleformEntries.size(), a_profile.scaleformEntries.size());
+			for (std::size_t currentIndex = 0;
+			     currentIndex < a_profile.scaleformPreviousIndices.size();
+			     ++currentIndex) {
+				const auto previousIndex = a_profile.scaleformPreviousIndices[currentIndex];
+				if (previousIndex >= currentIndicesByPrevious.size() ||
+				    currentIndicesByPrevious[previousIndex] != a_profile.scaleformEntries.size()) {
+					return false;
+				}
+				currentIndicesByPrevious[previousIndex] = currentIndex;
+			}
+
+			for (std::uint32_t enumIndex = 0; enumIndex < filteredData.GetArraySize(); ++enumIndex) {
+				RE::GFxValue oldEntry;
+				RE::GFxValue itemIndex;
+				RE::GFxValue currentEntry;
+				if (!filteredData.GetElement(enumIndex, std::addressof(oldEntry)) || !oldEntry.IsObject() ||
+				    !oldEntry.GetMember("itemIndex", std::addressof(itemIndex)) || !itemIndex.IsNumber()) {
+					return false;
+				}
+
+				const auto previousIndex = itemIndex.GetUInt();
+				if (previousIndex >= currentIndicesByPrevious.size()) {
+					return false;
+				}
+				const auto currentIndex = currentIndicesByPrevious[previousIndex];
+				if (currentIndex >= entryList.GetArraySize() ||
+				    !entryList.GetElement(static_cast<std::uint32_t>(currentIndex), std::addressof(currentEntry)) ||
+				    !currentEntry.IsObject() ||
+				    !currentEntry.SetMember("filteredIndex", RE::GFxValue{ enumIndex }) ||
+				    !filteredData.SetElement(enumIndex, currentEntry)) {
+					return false;
+				}
+			}
+			a_profile.scaleformEnumerationTime += std::chrono::steady_clock::now() - started;
+
+			return true;
+		}
+
+		bool TrySkyUIIncrementalInvalidation(RefreshProfile& a_profile)
+		{
+			if (!HasMatchingItemTopology(a_profile)) {
+				return false;
+			}
+
+			auto* menu = a_profile.menu;
+			auto* itemList = menu->itemList;
+			if (!menu->uiMovie) {
+				a_profile.incrementalInvalidationStatus = "full/movie unavailable";
+				return false;
+			}
+
+			RE::GFxValue dataProcessors;
+			RE::GFxValue listEnumeration;
+			RE::GFxValue selectedIndex;
+			RE::GFxValue suspended;
+			RE::GFxValue inventoryLists;
+			RE::GFxValue currentState;
+			RE::GFxValue onInvalidate;
+			if (!itemList->root.GetMember("_dataProcessors", std::addressof(dataProcessors)) ||
+			    !dataProcessors.IsArray() ||
+			    !itemList->root.GetMember("listEnumeration", std::addressof(listEnumeration)) ||
+			    !listEnumeration.IsObject() ||
+			    !itemList->root.GetMember("selectedIndex", std::addressof(selectedIndex)) ||
+			    !selectedIndex.IsNumber() ||
+			    !itemList->root.GetMember("suspended", std::addressof(suspended)) || !suspended.IsBool() ||
+			    suspended.GetBool()) {
+				a_profile.incrementalInvalidationStatus = "full/unsupported SkyUI incremental state";
+				return false;
+			}
+			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
+			    !menu->root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
+				a_profile.incrementalInvalidationStatus = "full/inventory lists unavailable";
+				return false;
+			}
+			if (!inventoryLists.GetMember("currentState", std::addressof(currentState)) ||
+			    !currentState.IsNumber() || currentState.GetSInt() != kSkyUIInventoryListsShowPanel) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI panel not shown";
+				return false;
+			}
+			if (itemList->root.GetMember("onInvalidate", std::addressof(onInvalidate)) &&
+			    !onInvalidate.IsUndefined() && !onInvalidate.IsNull()) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI callback pending";
+				return false;
+			}
+
+			const auto selection = selectedIndex.GetSInt();
+			if (selection < 0 || static_cast<std::size_t>(selection) >= a_profile.itemTopology.size()) {
+				a_profile.incrementalInvalidationStatus = "full/no active selection";
+				return false;
+			}
+
+			RE::GFxValue event;
+			menu->uiMovie->CreateObject(std::addressof(event));
+			if (!event.IsObject() ||
+			    !event.SetMember("type", RE::GFxValue{ "itemHighlightChange" }) ||
+			    !event.SetMember("index", selectedIndex)) {
+				a_profile.incrementalInvalidationStatus = "full/event creation failed";
+				return false;
+			}
+
+			SkyUIEnumerationSnapshot enumerationSnapshot;
+			if (!CaptureSkyUIEnumerationSnapshot(a_profile, listEnumeration, enumerationSnapshot)) {
+				a_profile.incrementalInvalidationStatus = "full/unsupported SkyUI filters";
+				return false;
+			}
+			if (!RunSkyUIDataProcessors(a_profile, dataProcessors)) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI processor failed";
+				return false;
+			}
+			if (!HasMatchingSkyUIEnumerationState(a_profile, enumerationSnapshot)) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI ordering changed";
+				return false;
+			}
+			if (!PatchSkyUIFilteredEnumeration(a_profile, listEnumeration)) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI enumeration patch failed";
+				return false;
+			}
+			RE::GFxValue selectedEntry;
+			RE::GFxValue filteredIndex;
+			if (!itemList->entryList.GetElement(
+					static_cast<std::uint32_t>(selection), std::addressof(selectedEntry)) ||
+			    !selectedEntry.IsObject() ||
+			    !selectedEntry.GetMember("filteredIndex", std::addressof(filteredIndex)) ||
+			    !filteredIndex.IsNumber()) {
+				a_profile.incrementalInvalidationStatus = "full/selection filtered out";
+				return false;
+			}
+
+			const auto rendererStarted = std::chrono::steady_clock::now();
+			if (!itemList->root.Invoke("UpdateList")) {
+				a_profile.incrementalInvalidationStatus = "full/item update failed";
+				return false;
+			}
+			a_profile.scaleformRendererTime += std::chrono::steady_clock::now() - rendererStarted;
+
+			const RE::GFxValue noSelection{ -1 };
+			if (!itemList->root.SetMember("selectedIndex", noSelection) ||
+			    !itemList->root.SetMember("selectedIndex", selectedIndex)) {
+				a_profile.incrementalInvalidationStatus = "full/selection restore failed";
+				return false;
+			}
+
+			const std::array args{ event };
+			if (!inventoryLists.Invoke("dispatchEvent", args)) {
+				a_profile.incrementalInvalidationStatus = "full/highlight dispatch failed";
+				return false;
+			}
+
+			a_profile.incrementalInvalidationStatus = "incremental SkyUI";
+			return true;
 		}
 
 		bool TryIncrementalInvalidation(RefreshProfile& a_profile)
@@ -529,9 +860,8 @@ namespace InventoryMenuHook
 
 			switch (PrepareSkyUIEntryCache(a_profile)) {
 			case SkyUIEntryCacheResult::kPrepared:
+				return TrySkyUIIncrementalInvalidation(a_profile);
 			case SkyUIEntryCacheResult::kFailed:
-				// SkyUI still runs its original invalidation. A prepared entry cache removes
-				// redundant item-card work without bypassing the movie's state machine.
 				return false;
 			case SkyUIEntryCacheResult::kNotApplicable:
 				break;
@@ -673,6 +1003,12 @@ namespace InventoryMenuHook
 				std::chrono::duration<double, std::milli>(a_profile.scaleformPushTime).count();
 			const auto scaleformInvalidateMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.scaleformInvalidateTime).count();
+			const auto scaleformProcessorMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformProcessorTime).count();
+			const auto scaleformEnumerationMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformEnumerationTime).count();
+			const auto scaleformRendererMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformRendererTime).count();
 			const auto itemListOtherMilliseconds =
 				itemListMilliseconds - enumerationMilliseconds - scaleformClearMilliseconds -
 				scaleformPushMilliseconds - scaleformInvalidateMilliseconds;
@@ -687,7 +1023,8 @@ namespace InventoryMenuHook
 				SKSE::log::info(
 					"{} inventory message: {} entries in {:.3f} ms "
 					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
-					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
+					"[processors: {:.3f} ms; enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
 					"internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
@@ -702,6 +1039,9 @@ namespace InventoryMenuHook
 					scaleformInvalidateMilliseconds,
 					a_profile.incrementalInvalidationStatus,
 					a_profile.scaleformChangedEntries,
+					scaleformProcessorMilliseconds,
+					scaleformEnumerationMilliseconds,
+					scaleformRendererMilliseconds,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -710,7 +1050,8 @@ namespace InventoryMenuHook
 				SKSE::log::debug(
 					"{} inventory message: {} entries in {:.3f} ms "
 					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
-					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
+					"[processors: {:.3f} ms; enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
 					"internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
@@ -725,6 +1066,9 @@ namespace InventoryMenuHook
 					scaleformInvalidateMilliseconds,
 					a_profile.incrementalInvalidationStatus,
 					a_profile.scaleformChangedEntries,
+					scaleformProcessorMilliseconds,
+					scaleformEnumerationMilliseconds,
+					scaleformRendererMilliseconds,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
