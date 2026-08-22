@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "InventoryMenuHook.h"
+#include "Settings.h"
 
 namespace
 {
@@ -15,6 +16,7 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
+	Settings::Load();
 
 	const auto* messaging = SKSE::GetMessagingInterface();
 	if (!messaging || !messaging->RegisterListener(OnSKSEMessage)) {

@@ -3,7 +3,7 @@ includes("lib/commonlibsse")
 
 -- set project constants
 set_project("InventoryRefreshFix")
-set_version("0.1.0")
+set_version("0.2.0")
 set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")
@@ -24,5 +24,6 @@ target("InventoryRefreshFix")
     -- add src files
     add_files("src/**.cpp")
     add_headerfiles("src/**.h")
+    add_installfiles("dist/SKSE/Plugins/InventoryRefreshFix.ini", { prefixdir = "SKSE/Plugins" })
     add_includedirs("src")
     set_pcxxheader("src/pch.h")

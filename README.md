@@ -2,7 +2,7 @@
 
 Runtime profiling groundwork for Skyrim's expensive full inventory-list refreshes.
 
-This first milestone leaves the game's refresh behavior unchanged. It measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list, and writes the rebuilt entry count and duration to the SKSE log when the call takes at least 5 ms. This establishes an in-game baseline before enabling any refresh coalescing.
+The profiler measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list, and writes the rebuilt entry count and duration to the SKSE log when the call takes at least 5 ms. It also includes an experimental coalescing path for redundant complete updates.
 
 `lib/commonlibsse` is pinned to [`ccf72cf`](https://github.com/jiayev/CommonLibSSE/commit/ccf72cf744639f8d42da2f84337838d2c1f67af5), which adds the reviewed inventory refresh interfaces used for the next implementation stage.
 
@@ -10,7 +10,13 @@ This first milestone leaves the game's refresh behavior unchanged. It measures t
 
 - Hooks `InventoryMenu::ProcessMessage` after SKSE's `kDataLoaded` event.
 - Times only `kInventoryUpdate` messages with a null `updateObj`, the game path that performs a complete item-list rebuild.
-- Does not discard, defer, cache, or otherwise alter inventory updates.
+- Retains profiling-only behavior by default.
+
+## Experimental coalescing
+
+Set `bEnableRefreshCoalescing=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the experimental path. It consumes adjacent complete-update messages, schedules one UI task, reacquires the still-open `InventoryMenu`, and calls the game's `RefreshItemList` and `RefreshBottomBar` helpers once.
+
+The default is `0` because the runtime data confirms redundant rebuilds, but not yet every possible update ordering. This setting should be tested with inventory opening, equipping and unequipping, consuming items, crafting, trading, picking up items, and scripted inventory changes.
 
 ### Requirements
 
@@ -79,5 +85,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.1.0`
+- Version: `0.2.0`
 - Author: `Jiaye`
