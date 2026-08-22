@@ -3,6 +3,7 @@
 #include "Settings.h"
 #include "pch.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -16,6 +17,8 @@ namespace InventoryMenuHook
 		using GetInventoryItemAt_t = RE::InventoryEntryData* (*)(RE::InventoryChanges*, std::int32_t);
 		using RefreshMenu_t = void (*)(RE::InventoryMenu*);
 		using UpdatePlayer3D_t = void (*)(RE::AIProcess*, RE::Actor*);
+		using RemoveElements_t = bool (*)(RE::GFxValue::ObjectInterface*, void*, std::uint32_t, std::int32_t);
+		using PushBack_t = bool (*)(RE::GFxValue::ObjectInterface*, void*, const RE::GFxValue&);
 
 		constexpr auto kSlowRefreshThreshold = std::chrono::milliseconds{ 5 };
 
@@ -23,9 +26,13 @@ namespace InventoryMenuHook
 		{
 			std::chrono::steady_clock::duration enumerationTime{};
 			std::chrono::steady_clock::duration itemListTime{};
+			std::chrono::steady_clock::duration scaleformClearTime{};
+			std::chrono::steady_clock::duration scaleformPushTime{};
+			std::chrono::steady_clock::duration scaleformInvalidateTime{};
 			std::chrono::steady_clock::duration bottomBarTime{};
 			std::chrono::steady_clock::duration player3DTime{};
 			std::uint32_t                       enumerationCalls{ 0 };
+			std::uint32_t                       scaleformPushCalls{ 0 };
 		};
 
 		thread_local RefreshProfile* g_activeRefreshProfile = nullptr;
@@ -88,6 +95,15 @@ namespace InventoryMenuHook
 				std::chrono::duration<double, std::milli>(a_profile.enumerationTime).count();
 			const auto itemListMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.itemListTime).count();
+			const auto scaleformClearMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformClearTime).count();
+			const auto scaleformPushMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformPushTime).count();
+			const auto scaleformInvalidateMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.scaleformInvalidateTime).count();
+			const auto itemListOtherMilliseconds =
+				itemListMilliseconds - enumerationMilliseconds - scaleformClearMilliseconds -
+				scaleformPushMilliseconds - scaleformInvalidateMilliseconds;
 			const auto bottomBarMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.bottomBarTime).count();
 			const auto player3DMilliseconds =
@@ -98,7 +114,8 @@ namespace InventoryMenuHook
 			if (a_elapsed >= kSlowRefreshThreshold) {
 				SKSE::log::info(
 					"{} inventory message: {} entries in {:.3f} ms "
-					"(item list: {:.3f} ms; enumeration: {:.3f} ms / {} calls; "
+					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms; internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
@@ -106,13 +123,19 @@ namespace InventoryMenuHook
 					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
+					scaleformClearMilliseconds,
+					scaleformPushMilliseconds,
+					a_profile.scaleformPushCalls,
+					scaleformInvalidateMilliseconds,
+					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
 					otherMilliseconds);
 			} else {
 				SKSE::log::debug(
 					"{} inventory message: {} entries in {:.3f} ms "
-					"(item list: {:.3f} ms; enumeration: {:.3f} ms / {} calls; "
+					"(item list: {:.3f} ms [enumeration: {:.3f} ms / {} calls; GFx clear: {:.3f} ms; "
+					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms; internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
 					itemCount,
@@ -120,6 +143,11 @@ namespace InventoryMenuHook
 					itemListMilliseconds,
 					enumerationMilliseconds,
 					a_profile.enumerationCalls,
+					scaleformClearMilliseconds,
+					scaleformPushMilliseconds,
+					a_profile.scaleformPushCalls,
+					scaleformInvalidateMilliseconds,
+					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
 					otherMilliseconds);
@@ -225,18 +253,180 @@ namespace InventoryMenuHook
 			static inline UpdatePlayer3D_t _updatePlayer3DOriginal = nullptr;
 		};
 
+		class ScaleformListHook
+		{
+		public:
+			static bool RemoveElementsThunk(
+				RE::GFxValue::ObjectInterface* a_interface,
+				void* a_data,
+				std::uint32_t a_index,
+				std::int32_t a_count)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _removeElementsOriginal(a_interface, a_data, a_index, a_count);
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				const auto result = _removeElementsOriginal(a_interface, a_data, a_index, a_count);
+				profile->scaleformClearTime += std::chrono::steady_clock::now() - started;
+
+				return result;
+			}
+
+			static bool PushBackThunk(
+				RE::GFxValue::ObjectInterface* a_interface,
+				void* a_data,
+				const RE::GFxValue& a_value)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _pushBackOriginal(a_interface, a_data, a_value);
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				const auto result = _pushBackOriginal(a_interface, a_data, a_value);
+				profile->scaleformPushTime += std::chrono::steady_clock::now() - started;
+				++profile->scaleformPushCalls;
+
+				return result;
+			}
+
+#ifdef SKYRIM_SUPPORT_AE
+			static void InvalidateThunk(
+				RE::GFxMovieView* a_movieView,
+				const char* a_methodName,
+				RE::FxResponseArgsBase& a_args)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _invalidateOriginal(a_movieView, a_methodName, a_args);
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				_invalidateOriginal(a_movieView, a_methodName, a_args);
+#else
+			static void InvalidateThunk(RE::ItemList* a_itemList)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _invalidateOriginal(a_itemList);
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				_invalidateOriginal(a_itemList);
+#endif
+
+				profile->scaleformInvalidateTime += std::chrono::steady_clock::now() - started;
+			}
+
+			static bool Install()
+			{
+				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
+				REL::Relocation<std::uintptr_t> removeElements{ RELOCATION_ID(80252, 82280) };
+				REL::Relocation<std::uintptr_t> pushBack{ RELOCATION_ID(80248, 82273) };
+
+#ifdef SKYRIM_SUPPORT_AE
+				const std::array removeCalls{
+					refreshItemList.address() + 0x190,
+					refreshItemList.address() + 0x218,
+					refreshItemList.address() + 0x2F6
+				};
+				const std::array pushCalls{
+					refreshItemList.address() + 0x1EE,
+					refreshItemList.address() + 0x2CC,
+					refreshItemList.address() + 0x3A0
+				};
+				const auto invalidateCall = refreshItemList.address() + 0x452;
+				REL::Relocation<std::uintptr_t> invalidate{ REL::Offset(0xFBE900) };
+#else
+				const auto sortName = GetCallTarget(refreshItemList.address() + 0x65);
+				const auto sortValue = GetCallTarget(refreshItemList.address() + 0x83);
+				const auto sortWeight = GetCallTarget(refreshItemList.address() + 0xA1);
+				const std::array removeCalls{
+					sortName + 0x27,
+					sortValue + 0x27,
+					sortWeight + 0x27
+				};
+				const std::array pushCalls{
+					sortName + 0xBF,
+					sortValue + 0xFF,
+					sortWeight + 0xFF
+				};
+				const auto invalidateCall = refreshItemList.address() + 0x11B;
+				REL::Relocation<std::uintptr_t> invalidate{ REL::Offset(0x8568D0) };
+#endif
+
+				for (const auto call : removeCalls) {
+					if (GetCallTarget(call) != removeElements.address()) {
+						SKSE::log::critical("Scaleform list-clear call-site validation failed; profiling disabled");
+						return false;
+					}
+				}
+				for (const auto call : pushCalls) {
+					if (GetCallTarget(call) != pushBack.address()) {
+						SKSE::log::critical("Scaleform list-push call-site validation failed; profiling disabled");
+						return false;
+					}
+				}
+				if (GetCallTarget(invalidateCall) != invalidate.address()) {
+					SKSE::log::critical("Scaleform list-invalidation call-site validation failed; profiling disabled");
+					return false;
+				}
+
+				auto& trampoline = SKSE::GetTrampoline();
+				for (const auto call : removeCalls) {
+					const auto original = reinterpret_cast<RemoveElements_t>(
+						trampoline.write_call<5>(call, RemoveElementsThunk));
+					if (!_removeElementsOriginal) {
+						_removeElementsOriginal = original;
+					} else if (_removeElementsOriginal != original) {
+						SKSE::log::critical("Scaleform list-clear call sites have different targets");
+						return false;
+					}
+				}
+				for (const auto call : pushCalls) {
+					const auto original = reinterpret_cast<PushBack_t>(
+						trampoline.write_call<5>(call, PushBackThunk));
+					if (!_pushBackOriginal) {
+						_pushBackOriginal = original;
+					} else if (_pushBackOriginal != original) {
+						SKSE::log::critical("Scaleform list-push call sites have different targets");
+						return false;
+					}
+				}
+
+				_invalidateOriginal = reinterpret_cast<Invalidate_t>(
+					trampoline.write_call<5>(invalidateCall, InvalidateThunk));
+				return true;
+			}
+
+		private:
+#ifdef SKYRIM_SUPPORT_AE
+			using Invalidate_t = void (*)(RE::GFxMovieView*, const char*, RE::FxResponseArgsBase&);
+#else
+			using Invalidate_t = void (*)(RE::ItemList*);
+#endif
+
+			static inline RemoveElements_t _removeElementsOriginal = nullptr;
+			static inline PushBack_t _pushBackOriginal = nullptr;
+			static inline Invalidate_t _invalidateOriginal = nullptr;
+		};
+
 		class InventoryEnumerationHook
 		{
 		public:
 			static RE::InventoryEntryData* Thunk(RE::InventoryChanges* a_changes, std::int32_t a_index)
 			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _original(a_changes, a_index);
+				}
+
 				const auto started = std::chrono::steady_clock::now();
 				auto* result = _original(a_changes, a_index);
-
-				if (g_activeRefreshProfile) {
-					g_activeRefreshProfile->enumerationTime += std::chrono::steady_clock::now() - started;
-					++g_activeRefreshProfile->enumerationCalls;
-				}
+				profile->enumerationTime += std::chrono::steady_clock::now() - started;
+				++profile->enumerationCalls;
 
 				return result;
 			}
@@ -371,12 +561,14 @@ namespace InventoryMenuHook
 
 	void Install()
 	{
-		SKSE::AllocTrampoline(256);
+		SKSE::AllocTrampoline(512);
 		const auto phaseProfilingInstalled = RefreshPhaseHook::Install();
+		const auto scaleformProfilingInstalled = ScaleformListHook::Install();
 		InventoryEnumerationHook::Install();
 		ProcessMessageHook::Install();
 		SKSE::log::info(
-			"Inventory menu refresh phase profiler installed ({})",
-			phaseProfilingInstalled ? "detailed phases enabled" : "message timing only");
+			"Inventory menu refresh phase profiler installed (refresh phases: {}; Scaleform phases: {})",
+			phaseProfilingInstalled ? "enabled" : "disabled",
+			scaleformProfilingInstalled ? "enabled" : "disabled");
 	}
 }

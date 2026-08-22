@@ -12,6 +12,7 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 - Times menu opening and player-targeted `kInventoryUpdate` messages with a null `updateObj`, the two paths that perform a complete item-list rebuild.
 - Instruments the exact `ProcessMessage` call sites for item-list rebuilding, bottom-bar updates, and player 3D rebuilding on Skyrim SE and AE.
 - Instruments both `InventoryChanges::GetInventoryItemAt` call sites inside `InventoryMenu::RefreshItemList` and reports their aggregate duration and call count.
+- Separates Scaleform array clearing, per-entry `PushBack`, and `InvalidateListData` from the remaining native materialization and sorting work.
 - Retains profiling-only behavior by default.
 
 ## Experimental coalescing
