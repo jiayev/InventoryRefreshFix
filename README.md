@@ -17,9 +17,9 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 
 ## Experimental incremental invalidation
 
-Set `bEnableIncrementalInvalidation=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the incremental UI path. Before rebuilding the native list, the plugin records the sorted item identities and category flags. If they are unchanged while the item panel has an active selection, it redraws the visible item renderers, restores the selected renderer, and reproduces the state-appropriate selection event without rescanning the complete list. Item additions, removals, reordering, category changes, inactive selections, unrelated menu states, missing movie interfaces, and unsupported menu layouts automatically use the original `InvalidateListData` callback.
+Set `bEnableIncrementalInvalidation=1` in `Data/SKSE/Plugins/InventoryRefreshFix.ini` to enable the incremental UI path. Before rebuilding the native list, the plugin records the sorted item identities, category flags, and Scaleform entry objects. If the topology is unchanged, SkyUI-compatible lists reuse processed objects whose native primitive fields are unchanged, retain new raw objects for changed entries, and then run the movie's original `InvalidateListData` callback. This preserves the movie's filtering, sorting, category, selection, and custom-processor behavior while allowing SkyUI's item-card processor to skip unchanged entry data. The vanilla list retains its visible-renderer fast path. Item additions, removals, reordering, category changes, missing movie interfaces, uncached entries, and unsupported menu layouts automatically use an unmodified full invalidation.
 
-This option targets the expensive ActionScript list invalidation while retaining the original full refresh as the correctness fallback. It remains disabled until inventory opening, equipping, favoriting, consuming, dropping, picking up, renaming, enchanting, and custom inventory-menu movies have been exercised.
+This option targets redundant ActionScript item-data processing while retaining the original full refresh as the correctness fallback. It remains disabled until inventory opening, equipping, favoriting, consuming, dropping, picking up, renaming, enchanting, and custom inventory-menu movies have been exercised.
 
 ## Experimental coalescing
 
