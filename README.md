@@ -1,10 +1,19 @@
 # InventoryRefreshFix
 
-Coalesces expensive Skyrim inventory-list refreshes and records refresh timing.
+Runtime profiling groundwork for Skyrim's expensive full inventory-list refreshes.
 
-Created from the local SKSE Mod template. `lib/commonlibsse` is a Git submodule pinned to a reviewed commit in [jiayev/CommonLibSSE](https://github.com/jiayev/CommonLibSSE).
+This first milestone leaves the game's refresh behavior unchanged. It measures the `InventoryMenu` path used when Skyrim rebuilds the entire Scaleform item list, and writes the rebuilt entry count and duration to the SKSE log when the call takes at least 5 ms. This establishes an in-game baseline before enabling any refresh coalescing.
+
+`lib/commonlibsse` is pinned to [`ccf72cf`](https://github.com/jiayev/CommonLibSSE/commit/ccf72cf744639f8d42da2f84337838d2c1f67af5), which adds the reviewed inventory refresh interfaces used for the next implementation stage.
+
+## Current scope
+
+- Hooks `InventoryMenu::ProcessMessage` after SKSE's `kDataLoaded` event.
+- Times only `kInventoryUpdate` messages with a null `updateObj`, the game path that performs a complete item-list rebuild.
+- Does not discard, defer, cache, or otherwise alter inventory updates.
 
 ### Requirements
+
 * [XMake](https://xmake.io) [3.0.0+]
 * C++23 Compiler (MSVC, Clang-CL)
 
@@ -67,7 +76,7 @@ xmake repo --update
 xmake require --upgrade
 ```
 
-## Template metadata
+## Project metadata
 
 - Name: `InventoryRefreshFix`
 - Version: `0.1.0`
