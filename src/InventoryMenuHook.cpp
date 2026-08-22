@@ -34,6 +34,9 @@ namespace InventoryMenuHook
 		constexpr auto kSkyUIInventoryListsShowPanel = 1;
 		constexpr auto kNativeSnapshotMember = "__InventoryRefreshFixNativeSnapshot";
 		constexpr std::array kNativeIdentityMembers{ "formId", "text", "filterFlag" };
+		constexpr std::array kNativeRefreshMembers{
+			"formId", "text", "count", "equipState", "filterFlag", "favorite", "enabled"
+		};
 
 		struct ItemTopologyEntry
 		{
@@ -77,6 +80,7 @@ namespace InventoryMenuHook
 			std::vector<std::size_t>            scaleformPreviousIndices;
 			bool                                itemTopologyCaptured{ false };
 			bool                                scaleformEntriesCaptured{ false };
+			bool                                usedScaleformPositionFallback{ false };
 			bool                                allowIncrementalInvalidation{ false };
 			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
 		};
@@ -341,6 +345,27 @@ namespace InventoryMenuHook
 			return comparedAny;
 		}
 
+		bool HasMatchingProcessedNativeRefreshFields(
+			const RE::GFxValue& a_entry,
+			const RE::GFxValue& a_processedEntry)
+		{
+			for (const auto* name : kNativeRefreshMembers) {
+				RE::GFxValue currentValue;
+				RE::GFxValue previousValue;
+				const bool currentHasMember = a_entry.GetMember(name, std::addressof(currentValue));
+				const bool previousHasMember =
+					a_processedEntry.GetMember(name, std::addressof(previousValue));
+				if (currentHasMember != previousHasMember ||
+				    (currentHasMember &&
+				     (!IsPrimitiveValue(currentValue) || !IsPrimitiveValue(previousValue) ||
+				      !ArePrimitiveValuesEqual(currentValue, previousValue)))) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
 		bool IsProcessedSkyUIEntry(const RE::GFxValue& a_entry, std::uint32_t a_filterFlag)
 		{
 			if (a_filterFlag == 0) {
@@ -403,6 +428,7 @@ namespace InventoryMenuHook
 		SkyUIEntryCacheResult PrepareSkyUIEntryCache(RefreshProfile& a_profile)
 		{
 			a_profile.scaleformChangedIndices.clear();
+			a_profile.usedScaleformPositionFallback = false;
 			auto* itemList = a_profile.menu->itemList;
 			RE::GFxValue dataProcessors;
 			RE::GFxValue listEnumeration;
@@ -515,6 +541,15 @@ namespace InventoryMenuHook
 						}
 					}
 				}
+				if (matchingIndex == a_profile.scaleformEntries.size() && nativeFullRebuild &&
+				    i < a_profile.itemTopology.size() && !usedOldEntries[i] &&
+				    a_profile.itemTopology[i] == newTopology) {
+					// Some movies process the opening list before a raw native snapshot can be
+					// attached. Identical per-position topology on a complete rebuild provides
+					// a conservative mapping fallback; refresh fields are compared below.
+					matchingIndex = i;
+					a_profile.usedScaleformPositionFallback = true;
+				}
 
 				if (matchingIndex == a_profile.scaleformEntries.size()) {
 					if (!AttachNativePrimitiveSnapshot(a_profile, newEntry)) {
@@ -545,13 +580,16 @@ namespace InventoryMenuHook
 
 				RE::GFxValue oldSnapshot;
 				// On the native partial-update path, every replacement belongs to a form the
-				// game explicitly marked dirty. Only full rebuilds may reuse a replacement
-				// after comparing its raw primitive data with the previous snapshot.
-				const bool canReuse =
-					nativeFullRebuild &&
+				// game explicitly marked dirty. Only full rebuilds may reuse a replacement,
+				// using either its raw snapshot or the stable refresh fields of a positional match.
+				const bool hasNativeSnapshot =
 					oldEntry.GetMember(kNativeSnapshotMember, std::addressof(oldSnapshot)) &&
-					oldSnapshot.IsObject() && HasMatchingNativePrimitiveFields(newEntry, oldSnapshot) &&
-					IsProcessedSkyUIEntry(oldEntry, newTopology.filterFlag);
+					oldSnapshot.IsObject();
+				const bool nativeFieldsMatch =
+					hasNativeSnapshot ? HasMatchingNativePrimitiveFields(newEntry, oldSnapshot) :
+					                    HasMatchingProcessedNativeRefreshFields(newEntry, oldEntry);
+				const bool canReuse = nativeFullRebuild && nativeFieldsMatch &&
+				                      IsProcessedSkyUIEntry(oldEntry, newTopology.filterFlag);
 				if (canReuse) {
 					if (!entryList.SetElement(i, oldEntry)) {
 						restoreNewEntries();
@@ -941,7 +979,9 @@ namespace InventoryMenuHook
 				return false;
 			}
 
-			a_profile.incrementalInvalidationStatus = "incremental SkyUI";
+			a_profile.incrementalInvalidationStatus =
+				a_profile.usedScaleformPositionFallback ? "incremental SkyUI/position-mapped" :
+				                                         "incremental SkyUI";
 			return true;
 		}
 
