@@ -53,6 +53,7 @@ function Build-And-Package {
 
     $variantBuildRoot = Get-SafeChildPath -Root $buildRoot -Child (Join-Path $buildRoot $Variant)
     $buildDirectory = Get-SafeChildPath -Root $variantBuildRoot -Child (Join-Path $variantBuildRoot "output")
+    $packageDirectory = Get-SafeChildPath -Root $buildDirectory -Child (Join-Path $buildDirectory "packages")
 
     if ($Clean -and (Test-Path -LiteralPath $variantBuildRoot)) {
         Remove-Item -LiteralPath $variantBuildRoot -Recurse -Force
@@ -63,13 +64,20 @@ function Build-And-Package {
         $aeOption = if ($Variant -eq "AE") { "y" } else { "n" }
         Invoke-XMake @("f", "-o", $buildDirectory, "-m", "releasedbg", "--skyrim_ae=$aeOption")
         Invoke-XMake @("build")
+
+        if (Test-Path -LiteralPath $packageDirectory) {
+            $stalePackages = @(Get-ChildItem -LiteralPath $packageDirectory -Filter "*.zip" -File)
+            foreach ($package in $stalePackages) {
+                Remove-Item -LiteralPath $package.FullName -Force
+            }
+        }
+
         Invoke-XMake @("package")
     }
     finally {
         Pop-Location
     }
 
-    $packageDirectory = Join-Path $buildDirectory "packages"
     $packages = @(Get-ChildItem -LiteralPath $packageDirectory -Filter "*.zip" -File | Sort-Object LastWriteTimeUtc -Descending)
     if ($packages.Count -ne 1) {
         throw "Expected exactly one ZIP in '$packageDirectory', found $($packages.Count)."
