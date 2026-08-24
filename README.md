@@ -14,6 +14,7 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 - Instruments both `InventoryChanges::GetInventoryItemAt` call sites inside `InventoryMenu::RefreshItemList` and reports their aggregate duration and call count.
 - Replaces the indexed near-quadratic inventory materializer with one refresh-scoped linear pass. The first sequence in a game session is compared row-for-row with the original implementation before subsequent refreshes rely on it.
 - Separates Scaleform array clearing, per-entry `PushBack`, and `InvalidateListData` from the remaining native materialization and sorting work.
+- Separates native per-entry construction and native sorting from the remaining item-list refresh work.
 
 ## Native inventory enumeration
 
@@ -96,5 +97,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.5.2`
+- Version: `0.5.3`
 - Author: `Jiaye`
