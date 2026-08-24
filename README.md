@@ -96,5 +96,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.5.1`
+- Version: `0.5.2`
 - Author: `Jiaye`

@@ -3,7 +3,7 @@ includes("lib/commonlibsse")
 
 -- set project constants
 set_project("InventoryRefreshFix")
-set_version("0.5.1")
+set_version("0.5.2")
 set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")

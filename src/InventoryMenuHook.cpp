@@ -1266,28 +1266,33 @@ namespace InventoryMenuHook
 				REL::Relocation<std::uintptr_t> refreshBottomBar{ RELOCATION_ID(50986, 51865) };
 				REL::Relocation<std::uintptr_t> updatePlayer3D{ RELOCATION_ID(38404, 39395) };
 
-				const auto processMessage =
+				const auto dispatchedProcessMessage =
 					*reinterpret_cast<const std::uintptr_t*>(vtable.address() + 4 * sizeof(std::uintptr_t));
 
 #ifdef SKYRIM_SUPPORT_AE
+				REL::Relocation<std::uintptr_t> processMessage{ REL::Offset(0x92C5D0) };
 				constexpr std::ptrdiff_t kOpenItemListOffset = 0x21B;
 				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x223;
 				constexpr std::ptrdiff_t kFullItemListOffset = 0xB2B;
 				constexpr std::ptrdiff_t kFullBottomBarOffset = 0xB33;
 				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0xB5D;
 #else
+				REL::Relocation<std::uintptr_t> processMessage{ REL::Offset(0x88D1F0) };
 				constexpr std::ptrdiff_t kOpenItemListOffset = 0x134;
 				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x13C;
 				constexpr std::ptrdiff_t kFullItemListOffset = 0x785;
 				constexpr std::ptrdiff_t kFullBottomBarOffset = 0x78D;
 				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0x7B7;
 #endif
+				if (dispatchedProcessMessage != processMessage.address()) {
+					SKSE::log::info("InventoryMenu::ProcessMessage was already redirected; using native refresh call sites");
+				}
 
-				const auto openItemListCall = processMessage + kOpenItemListOffset;
-				const auto openBottomBarCall = processMessage + kOpenBottomBarOffset;
-				const auto fullItemListCall = processMessage + kFullItemListOffset;
-				const auto fullBottomBarCall = processMessage + kFullBottomBarOffset;
-				const auto fullPlayer3DCall = processMessage + kFullPlayer3DOffset;
+				const auto openItemListCall = processMessage.address() + kOpenItemListOffset;
+				const auto openBottomBarCall = processMessage.address() + kOpenBottomBarOffset;
+				const auto fullItemListCall = processMessage.address() + kFullItemListOffset;
+				const auto fullBottomBarCall = processMessage.address() + kFullBottomBarOffset;
+				const auto fullPlayer3DCall = processMessage.address() + kFullPlayer3DOffset;
 
 				if (GetCallTarget(openItemListCall) != refreshItemList.address() ||
 				    GetCallTarget(fullItemListCall) != refreshItemList.address() ||
