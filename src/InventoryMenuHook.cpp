@@ -1519,7 +1519,7 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-			static void Install()
+			static bool Install()
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
 				REL::Relocation<std::uintptr_t> getInventoryItemAt{ RELOCATION_ID(15866, 16106) };
@@ -1536,8 +1536,8 @@ namespace InventoryMenuHook
 				const auto loopCall = refreshItemList.address() + kLoopCallOffset;
 				if (GetCallTarget(firstCall) != getInventoryItemAt.address() ||
 					GetCallTarget(loopCall) != getInventoryItemAt.address()) {
-					SKSE::log::critical("Inventory enumeration call-site validation failed; phase profiling disabled");
-					return;
+					SKSE::log::critical("Inventory enumeration call-site validation failed; bulk enumeration disabled");
+					return false;
 				}
 
 				auto& trampoline = SKSE::GetTrampoline();
@@ -1548,7 +1548,10 @@ namespace InventoryMenuHook
 
 				if (_original != loopOriginal) {
 					SKSE::log::critical("Inventory enumeration call sites have different targets");
+					return false;
 				}
+
+				return true;
 			}
 
 		private:
@@ -1582,14 +1585,15 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-			static void Install()
+			static bool Install()
 			{
 				if (_original) {
-					return;
+					return true;
 				}
 
 				REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_InventoryMenu[0] };
 				_original = reinterpret_cast<ProcessMessage_t>(vtable.write_vfunc(4, Thunk));
+				return _original != nullptr;
 			}
 
 		private:
@@ -1602,11 +1606,14 @@ namespace InventoryMenuHook
 		SKSE::AllocTrampoline(512);
 		const auto phaseProfilingInstalled = RefreshPhaseHook::Install();
 		const auto scaleformProfilingInstalled = ScaleformListHook::Install();
-		InventoryEnumerationHook::Install();
-		ProcessMessageHook::Install();
+		const auto inventoryEnumerationInstalled = InventoryEnumerationHook::Install();
+		const auto processMessageInstalled = ProcessMessageHook::Install();
 		SKSE::log::info(
-			"Inventory menu refresh phase profiler installed (refresh phases: {}; Scaleform phases: {})",
+			"Inventory hooks installed (refresh phases: {}; Scaleform list: {}; "
+			"bulk enumeration: {}; menu messages: {})",
 			phaseProfilingInstalled ? "enabled" : "disabled",
-			scaleformProfilingInstalled ? "enabled" : "disabled");
+			scaleformProfilingInstalled ? "enabled" : "disabled",
+			inventoryEnumerationInstalled ? "enabled" : "disabled",
+			processMessageInstalled ? "enabled" : "disabled");
 	}
 }

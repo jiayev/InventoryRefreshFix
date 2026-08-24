@@ -12,7 +12,7 @@ namespace Settings
 
 		bool g_enableInventoryEnumeration = true;
 		bool g_validateInventoryEnumeration = true;
-		bool g_enableIncrementalInvalidation = false;
+		bool g_enableIncrementalInvalidation = true;
 	}
 
 	void Load()
@@ -30,15 +30,18 @@ namespace Settings
 		g_enableIncrementalInvalidation = GetPrivateProfileIntW(
 			L"General",
 			L"bEnableIncrementalInvalidation",
-			0,
+			1,
 			kConfigPath) != 0;
 
+		const auto configStatus =
+			GetFileAttributesW(kConfigPath) != INVALID_FILE_ATTRIBUTES ? "loaded" : "not found; using defaults";
 		SKSE::log::info(
 			"Inventory refresh optimizations (bulk enumeration: {} / validation: {}; "
-			"incremental invalidation: {})",
+			"incremental invalidation: {}; configuration: {})",
 			g_enableInventoryEnumeration ? "enabled" : "disabled",
 			g_validateInventoryEnumeration ? "enabled" : "disabled",
-			g_enableIncrementalInvalidation ? "enabled" : "disabled");
+			g_enableIncrementalInvalidation ? "enabled" : "disabled",
+			configStatus);
 	}
 
 	bool IsInventoryEnumerationEnabled()
