@@ -41,6 +41,8 @@ Set `bEnableIncrementalInvalidation=1` in `Data/SKSE/Plugins/InventoryRefreshFix
 
 This option targets redundant ActionScript item-data processing, filtering, and sorting while retaining the original full refresh as the correctness fallback. It is enabled by default.
 
+Icon and property updates invoke their installed `processList` methods with a temporary list containing only changed entry references. Both `entryList` and `_entryList` expose that same array, preserving InventoryInjector's list-level icon hook without reprocessing every cached item. The item-card processor still receives the real complete list. Native full rebuilds are identified from `pendingUpdateObjects` before the engine refresh, independently of whether partial collection also used bulk enumeration. See [InventoryInjector compatibility](docs/InventoryInjector.md).
+
 ### Requirements
 
 * Skyrim SE 1.5.97 or Skyrim AE 1.6.1170
@@ -110,5 +112,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.6.0`
+- Version: `0.6.1`
 - Author: `Jiaye`

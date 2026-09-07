@@ -89,6 +89,7 @@ namespace InventoryMenuHook
 			bool                                scaleformEntriesCaptured{ false };
 			bool                                usedScaleformPositionFallback{ false };
 			bool                                allowIncrementalInvalidation{ false };
+			bool                                nativeFullRebuild{ false };
 			std::string_view                    inventoryEnumerationStatus{ "not requested" };
 			std::string_view                    nativeSortStatus{ "original" };
 			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
@@ -497,7 +498,7 @@ namespace InventoryMenuHook
 			}
 
 			std::uint32_t changedEntries = 0;
-			const bool nativeFullRebuild = a_profile.enumerationCalls != 0;
+			const bool nativeFullRebuild = a_profile.nativeFullRebuild;
 			for (std::uint32_t i = 0; i < entryCount; ++i) {
 				auto& newEntry = newEntries[i];
 				auto* item = itemList->items[i];
@@ -646,9 +647,6 @@ namespace InventoryMenuHook
 			RE::GFxValue propertyList;
 			RE::GFxValue iconList;
 			RE::GFxValue compoundPropertyList;
-			// Standard SkyUI registers InventoryDataSetter, InventoryIconSetter, and
-			// PropertyDataExtender in this order. Verify their stable instance fields
-			// before relying on the latter two processList methods being simple loops.
 			if (!a_dataProcessors.GetElement(0, std::addressof(itemCardProcessor)) ||
 			    !itemCardProcessor.IsObject() ||
 			    !itemCardProcessor.GetMember("_requestItemInfo", std::addressof(requestItemInfo)) ||
@@ -690,6 +688,14 @@ namespace InventoryMenuHook
 				std::chrono::steady_clock::now() - itemCardStarted;
 
 			const auto entryProcessorsStarted = std::chrono::steady_clock::now();
+			RE::GFxValue changedEntries;
+			RE::GFxValue changedList;
+			a_profile.menu->uiMovie->CreateArray(std::addressof(changedEntries));
+			a_profile.menu->uiMovie->CreateObject(std::addressof(changedList));
+			if (!changedEntries.IsArray() || !changedList.IsObject()) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI changed list creation failed";
+				return false;
+			}
 			for (const auto index : a_profile.scaleformChangedIndices) {
 				RE::GFxValue entry;
 				if (index >= entryList.GetArraySize() ||
@@ -698,12 +704,21 @@ namespace InventoryMenuHook
 					return false;
 				}
 
-				const std::array entryArgs{ entry };
-				if (!iconProcessor.Invoke("processEntry", entryArgs) ||
-				    !propertyProcessor.Invoke("processEntry", entryArgs)) {
-					a_profile.incrementalInvalidationStatus = "full/SkyUI entry processor failed";
+				if (!changedEntries.PushBack(entry)) {
+					a_profile.incrementalInvalidationStatus = "full/SkyUI changed list population failed";
 					return false;
 				}
+			}
+			if (!changedList.SetMember("entryList", changedEntries) ||
+			    !changedList.SetMember("_entryList", changedEntries)) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI changed list binding failed";
+				return false;
+			}
+			const std::array changedListArgs{ changedList };
+			if (!iconProcessor.Invoke("processList", changedListArgs) ||
+			    !propertyProcessor.Invoke("processList", changedListArgs)) {
+				a_profile.incrementalInvalidationStatus = "full/SkyUI entry processor failed";
+				return false;
 			}
 			a_profile.scaleformEntryProcessorTime +=
 				std::chrono::steady_clock::now() - entryProcessorsStarted;
@@ -1262,6 +1277,9 @@ namespace InventoryMenuHook
 			static void RefreshItemListThunk(RE::InventoryMenu* a_menu)
 			{
 				const auto started = std::chrono::steady_clock::now();
+				if (g_activeRefreshProfile) {
+					g_activeRefreshProfile->nativeFullRebuild = a_menu && a_menu->pendingUpdateObjects.empty();
+				}
 				if (g_activeRefreshProfile && g_activeRefreshProfile->allowIncrementalInvalidation) {
 					const auto captureStarted = std::chrono::steady_clock::now();
 					CaptureItemTopology(*g_activeRefreshProfile, a_menu);

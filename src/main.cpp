@@ -6,7 +6,7 @@
 
 namespace
 {
-	constexpr auto kPluginVersion = "0.6.0";
+	constexpr auto kPluginVersion = "0.6.1";
 
 	void OnSKSEMessage(SKSE::MessagingInterface::Message* a_message)
 	{
