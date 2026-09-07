@@ -72,6 +72,8 @@ namespace InventoryMenuHook
 			std::chrono::steady_clock::duration scaleformRendererTime{};
 			std::chrono::steady_clock::duration nativeItemConstructionTime{};
 			std::chrono::steady_clock::duration nativeSortTime{};
+			std::chrono::steady_clock::duration topologyCaptureTime{};
+			std::chrono::steady_clock::duration bestInClassTime{};
 			std::chrono::steady_clock::duration bottomBarTime{};
 			std::chrono::steady_clock::duration player3DTime{};
 			std::uint32_t                       enumerationCalls{ 0 };
@@ -87,7 +89,8 @@ namespace InventoryMenuHook
 			bool                                scaleformEntriesCaptured{ false };
 			bool                                usedScaleformPositionFallback{ false };
 			bool                                allowIncrementalInvalidation{ false };
-			std::string_view                    inventoryEnumerationStatus{ "original/disabled" };
+			std::string_view                    inventoryEnumerationStatus{ "not requested" };
+			std::string_view                    nativeSortStatus{ "original" };
 			std::string_view                    incrementalInvalidationStatus{ "full/disabled" };
 		};
 
@@ -1156,10 +1159,15 @@ namespace InventoryMenuHook
 				std::chrono::duration<double, std::milli>(a_profile.nativeItemConstructionTime).count();
 			const auto nativeSortMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.nativeSortTime).count();
+			const auto topologyCaptureMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.topologyCaptureTime).count();
+			const auto bestInClassMilliseconds =
+				std::chrono::duration<double, std::milli>(a_profile.bestInClassTime).count();
 			const auto itemListOtherMilliseconds =
 				itemListMilliseconds - enumerationMilliseconds - scaleformClearMilliseconds -
 				scaleformPushMilliseconds - scaleformInvalidateMilliseconds -
-				nativeItemConstructionMilliseconds - nativeSortMilliseconds;
+				nativeItemConstructionMilliseconds - nativeSortMilliseconds -
+				topologyCaptureMilliseconds - bestInClassMilliseconds;
 			const auto bottomBarMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.bottomBarTime).count();
 			const auto player3DMilliseconds =
@@ -1174,7 +1182,8 @@ namespace InventoryMenuHook
 					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
 					"[processors: {:.3f} ms (item card: {:.3f} ms; changed entries: {:.3f} ms); "
 					"enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
-					"native construction: {:.3f} ms / {} calls; native sort: {:.3f} ms; "
+					"native construction: {:.3f} ms / {} calls; native sort: {:.3f} ms / {}; "
+					"topology capture: {:.3f} ms; best in class: {:.3f} ms; "
 					"internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
@@ -1198,6 +1207,9 @@ namespace InventoryMenuHook
 					nativeItemConstructionMilliseconds,
 					a_profile.nativeItemConstructionCalls,
 					nativeSortMilliseconds,
+					a_profile.nativeSortStatus,
+					topologyCaptureMilliseconds,
+					bestInClassMilliseconds,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -1209,7 +1221,8 @@ namespace InventoryMenuHook
 					"GFx push: {:.3f} ms / {} calls; GFx invalidate: {:.3f} ms / {} / {} changed "
 					"[processors: {:.3f} ms (item card: {:.3f} ms; changed entries: {:.3f} ms); "
 					"enumeration patch: {:.3f} ms; renderers: {:.3f} ms]; "
-					"native construction: {:.3f} ms / {} calls; native sort: {:.3f} ms; "
+					"native construction: {:.3f} ms / {} calls; native sort: {:.3f} ms / {}; "
+					"topology capture: {:.3f} ms; best in class: {:.3f} ms; "
 					"internal other: {:.3f} ms]; "
 					"bottom bar: {:.3f} ms; player 3D: {:.3f} ms; other: {:.3f} ms)",
 					a_kind,
@@ -1233,6 +1246,9 @@ namespace InventoryMenuHook
 					nativeItemConstructionMilliseconds,
 					a_profile.nativeItemConstructionCalls,
 					nativeSortMilliseconds,
+					a_profile.nativeSortStatus,
+					topologyCaptureMilliseconds,
+					bestInClassMilliseconds,
 					itemListOtherMilliseconds,
 					bottomBarMilliseconds,
 					player3DMilliseconds,
@@ -1247,7 +1263,9 @@ namespace InventoryMenuHook
 			{
 				const auto started = std::chrono::steady_clock::now();
 				if (g_activeRefreshProfile && g_activeRefreshProfile->allowIncrementalInvalidation) {
+					const auto captureStarted = std::chrono::steady_clock::now();
 					CaptureItemTopology(*g_activeRefreshProfile, a_menu);
+					g_activeRefreshProfile->topologyCaptureTime += std::chrono::steady_clock::now() - captureStarted;
 				}
 				_refreshItemListOriginal(a_menu);
 
@@ -1654,6 +1672,29 @@ namespace InventoryMenuHook
 					}
 				}
 
+#ifdef SKYRIM_SUPPORT_AE
+				const auto comparator = REL::Relocation<std::uintptr_t>{ REL::Offset(0x929B20) }.address();
+				const auto firstCompare = expectedTargets[0] + 0x70;
+				const auto secondCompare = expectedTargets[0] + 0xFF;
+#else
+				const auto comparator = REL::Relocation<std::uintptr_t>{ REL::Offset(0x889E60) }.address();
+				const auto partition = REL::Relocation<std::uintptr_t>{ REL::Offset(0x854100) }.address();
+				const auto firstCompare = partition + 0x4F;
+				const auto secondCompare = partition + 0xAD;
+				const auto recurse = REL::Relocation<std::uintptr_t>{ REL::Offset(0x854300) }.address();
+				if (GetCallTarget(expectedTargets[0] + 0x46) != partition ||
+				    GetCallTarget(expectedTargets[0] + 0x5F) != recurse ||
+				    GetCallTarget(expectedTargets[0] + 0x7B) != recurse) {
+					SKSE::log::critical("Native name-sort body validation failed; sort hook disabled");
+					return false;
+				}
+#endif
+				if (GetCallTarget(firstCompare) == comparator && GetCallTarget(secondCompare) == comparator) {
+					_nameComparator = reinterpret_cast<Compare_t>(comparator);
+				} else {
+					SKSE::log::warn("Native name comparator validation failed; retaining original sorting");
+				}
+
 				auto& trampoline = SKSE::GetTrampoline();
 				for (std::size_t i = 0; i < calls.size(); ++i) {
 					_originals[i] = reinterpret_cast<Sort_t>(trampoline.write_call<5>(calls[i], thunks[i]));
@@ -1663,6 +1704,46 @@ namespace InventoryMenuHook
 			}
 
 		private:
+			using Compare_t = std::int32_t (*)(void*, RE::ItemList::Item* const*, RE::ItemList::Item* const*);
+
+			static bool CanSortName(RE::BSTArray<RE::ItemList::Item*>* a_items, void* a_comparator)
+			{
+				const auto* profile = g_activeRefreshProfile;
+				return _nameComparator && Settings::IsNativeNameSortEnabled() && a_comparator &&
+				       profile && profile->menu && profile->menu->itemList &&
+				       a_items == std::addressof(profile->menu->itemList->items);
+			}
+
+			static void SortName(RE::BSTArray<RE::ItemList::Item*>& a_items, void* a_comparator)
+			{
+				if (a_items.size() > 1) {
+					std::sort(a_items.begin(), a_items.end(), [a_comparator](auto* a_left, auto* a_right) {
+						return _nameComparator(a_comparator, std::addressof(a_left), std::addressof(a_right)) < 0;
+					});
+				}
+				g_activeRefreshProfile->nativeSortStatus = "bounded/name";
+			}
+
+#ifndef SKYRIM_SUPPORT_AE
+			static void RebuildNameOrder(RE::ItemList& a_list, void* a_comparator)
+			{
+				auto* profile = g_activeRefreshProfile;
+				auto started = std::chrono::steady_clock::now();
+				a_list.entryList.RemoveElements(0, -1);
+				profile->scaleformClearTime += std::chrono::steady_clock::now() - started;
+
+				SortName(a_list.items, a_comparator);
+
+				started = std::chrono::steady_clock::now();
+				for (auto* item : a_list.items) {
+					a_list.entryList.PushBack(item->obj);
+					++profile->scaleformPushCalls;
+				}
+				profile->scaleformPushTime += std::chrono::steady_clock::now() - started;
+				a_list.updatePending = false;
+			}
+#endif
+
 #ifdef SKYRIM_SUPPORT_AE
 			static void Invoke(
 				std::size_t a_index,
@@ -1675,7 +1756,13 @@ namespace InventoryMenuHook
 				const auto clearBefore = profile ? profile->scaleformClearTime : std::chrono::steady_clock::duration{};
 				const auto pushBefore = profile ? profile->scaleformPushTime : std::chrono::steady_clock::duration{};
 				const auto started = std::chrono::steady_clock::now();
-				_originals[a_index](a_items, a_comparator, a_first, a_last);
+				auto* items = static_cast<RE::BSTArray<RE::ItemList::Item*>*>(a_items);
+				if (a_index == 0 && CanSortName(items, a_comparator) &&
+				    a_first == 0 && items->size() > 1 && a_last == items->size() - 1) {
+					SortName(*items, a_comparator);
+				} else {
+					_originals[a_index](a_items, a_comparator, a_first, a_last);
+				}
 #else
 			static void Invoke(std::size_t a_index, RE::ItemList* a_itemList, void* a_comparator)
 			{
@@ -1683,7 +1770,12 @@ namespace InventoryMenuHook
 				const auto clearBefore = profile ? profile->scaleformClearTime : std::chrono::steady_clock::duration{};
 				const auto pushBefore = profile ? profile->scaleformPushTime : std::chrono::steady_clock::duration{};
 				const auto started = std::chrono::steady_clock::now();
-				_originals[a_index](a_itemList, a_comparator);
+				if (a_index == 0 && a_itemList && a_itemList->entryList.IsArray() &&
+				    CanSortName(std::addressof(a_itemList->items), a_comparator)) {
+					RebuildNameOrder(*a_itemList, a_comparator);
+				} else {
+					_originals[a_index](a_itemList, a_comparator);
+				}
 #endif
 				if (profile) {
 					const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -1694,6 +1786,125 @@ namespace InventoryMenuHook
 			}
 
 			static inline std::array<Sort_t, 3> _originals{};
+			static inline Compare_t _nameComparator = nullptr;
+		};
+
+		class ObjectEnumerationHook
+		{
+		public:
+			static void Thunk(
+				RE::InventoryChanges* a_changes,
+				RE::TESBoundObject* a_object,
+				RE::BSTArray<RE::InventoryEntryData*>* a_result)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile || !a_changes || !a_result) {
+					_original(a_changes, a_object, a_result);
+					return;
+				}
+				if (!a_object) {
+					return;
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				if (!Settings::IsInventoryEnumerationEnabled()) {
+					_original(a_changes, a_object, a_result);
+					profile->inventoryEnumerationStatus = "original/object";
+				} else {
+					InventoryEnumeration::Session session;
+					bool matched = false;
+					for (std::int32_t index = 0;; ++index) {
+						std::unique_ptr<RE::InventoryEntryData> entry{
+							session.Get(a_changes, index, _getInventoryItemAt, true,
+								Settings::IsInventoryEnumerationValidationEnabled())
+						};
+						++profile->enumerationCalls;
+						if (!entry) {
+							break;
+						}
+						if (entry->object == a_object) {
+							a_result->push_back(entry.get());
+							entry.release();
+							matched = true;
+						} else if (matched) {
+							break;
+						}
+					}
+					const auto status = session.GetStatus();
+					profile->inventoryEnumerationStatus = status.starts_with("bulk") ? "bulk/object" : status;
+				}
+				profile->enumerationTime += std::chrono::steady_clock::now() - started;
+			}
+
+			static bool Install()
+			{
+				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
+				REL::Relocation<std::uintptr_t> getInventoryItemAt{ RELOCATION_ID(15866, 16106) };
+#ifdef SKYRIM_SUPPORT_AE
+				const auto call = refreshItemList.address() + 0x732;
+				const auto collect = REL::Relocation<std::uintptr_t>{ REL::Offset(0x233CA0) }.address();
+				const auto loopCall = collect + 0xBF;
+#else
+				const auto call = refreshItemList.address() + 0x9C1;
+				const auto collect = REL::Relocation<std::uintptr_t>{ REL::Offset(0x1E7210) }.address();
+				const auto loopCall = collect + 0xC7;
+#endif
+				const std::array<std::uint8_t, 3> prologue{ 0x48, 0x85, 0xD2 };
+				if (GetCallTarget(call) != collect ||
+				    std::memcmp(reinterpret_cast<const void*>(collect), prologue.data(), prologue.size()) != 0 ||
+				    GetCallTarget(collect + 0x38) != getInventoryItemAt.address() ||
+				    GetCallTarget(loopCall) != getInventoryItemAt.address()) {
+					SKSE::log::critical("Object inventory-enumeration call-site validation failed; optimization disabled");
+					return false;
+				}
+				_getInventoryItemAt = reinterpret_cast<GetInventoryItemAt_t>(getInventoryItemAt.address());
+				_original = reinterpret_cast<Collect_t>(SKSE::GetTrampoline().write_call<5>(call, Thunk));
+				return true;
+			}
+
+		private:
+			using Collect_t = void (*)(RE::InventoryChanges*, RE::TESBoundObject*, RE::BSTArray<RE::InventoryEntryData*>*);
+
+			static inline Collect_t _original = nullptr;
+			static inline GetInventoryItemAt_t _getInventoryItemAt = nullptr;
+		};
+
+		class BestInClassHook
+		{
+		public:
+			static std::uint32_t Thunk(void* a_context, RE::ItemList::Item* a_item)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _original(a_context, a_item);
+				}
+				const auto started = std::chrono::steady_clock::now();
+				const auto result = _original(a_context, a_item);
+				profile->bestInClassTime += std::chrono::steady_clock::now() - started;
+				return result;
+			}
+
+			static bool Install()
+			{
+				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
+#ifdef SKYRIM_SUPPORT_AE
+				const auto call = refreshItemList.address() + 0x3E8;
+				const auto visit = REL::Relocation<std::uintptr_t>{ REL::Offset(0x92B7F0) }.address();
+#else
+				const auto call = refreshItemList.address() + 0xFA;
+				const auto visit = REL::Relocation<std::uintptr_t>{ REL::Offset(0x88C4A0) }.address();
+#endif
+				if (GetCallTarget(call) != visit) {
+					SKSE::log::critical("Best-in-class call-site validation failed; profiling disabled");
+					return false;
+				}
+				_original = reinterpret_cast<Visit_t>(SKSE::GetTrampoline().write_call<5>(call, Thunk));
+				return true;
+			}
+
+		private:
+			using Visit_t = std::uint32_t (*)(void*, RE::ItemList::Item*);
+			static inline Visit_t _original = nullptr;
 		};
 
 		class InventoryEnumerationHook
@@ -1810,15 +2021,20 @@ namespace InventoryMenuHook
 		const auto nativeItemConstructionInstalled = NativeItemConstructionHook::Install();
 		const auto nativeSortInstalled = NativeSortHook::Install();
 		const auto inventoryEnumerationInstalled = InventoryEnumerationHook::Install();
+		const auto objectEnumerationInstalled = ObjectEnumerationHook::Install();
+		const auto bestInClassInstalled = BestInClassHook::Install();
 		const auto processMessageInstalled = ProcessMessageHook::Install();
 		SKSE::log::info(
 			"Inventory hooks installed (refresh phases: {}; Scaleform list: {}; "
-			"native construction: {}; native sort: {}; bulk enumeration: {}; menu messages: {})",
+			"native construction: {}; native sort: {}; bulk enumeration: {}; "
+			"object enumeration: {}; best in class: {}; menu messages: {})",
 			phaseProfilingInstalled ? "enabled" : "disabled",
 			scaleformProfilingInstalled ? "enabled" : "disabled",
 			nativeItemConstructionInstalled ? "enabled" : "disabled",
 			nativeSortInstalled ? "enabled" : "disabled",
 			inventoryEnumerationInstalled ? "enabled" : "disabled",
+			objectEnumerationInstalled ? "enabled" : "disabled",
+			bestInClassInstalled ? "enabled" : "disabled",
 			processMessageInstalled ? "enabled" : "disabled");
 	}
 }

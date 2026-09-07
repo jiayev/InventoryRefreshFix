@@ -7,4 +7,5 @@ namespace Settings
 	[[nodiscard]] bool IsInventoryEnumerationEnabled();
 	[[nodiscard]] bool IsInventoryEnumerationValidationEnabled();
 	[[nodiscard]] bool IsIncrementalInvalidationEnabled();
+	[[nodiscard]] bool IsNativeNameSortEnabled();
 }

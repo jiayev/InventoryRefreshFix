@@ -13,6 +13,7 @@ namespace Settings
 		bool g_enableInventoryEnumeration = true;
 		bool g_validateInventoryEnumeration = true;
 		bool g_enableIncrementalInvalidation = true;
+		bool g_enableNativeNameSort = true;
 	}
 
 	void Load()
@@ -33,14 +34,21 @@ namespace Settings
 			1,
 			kConfigPath) != 0;
 
+		g_enableNativeNameSort = GetPrivateProfileIntW(
+			L"General",
+			L"bEnableNativeNameSort",
+			1,
+			kConfigPath) != 0;
+
 		const auto configStatus =
 			GetFileAttributesW(kConfigPath) != INVALID_FILE_ATTRIBUTES ? "loaded" : "not found; using defaults";
 		SKSE::log::info(
 			"Inventory refresh optimizations (bulk enumeration: {} / validation: {}; "
-			"incremental invalidation: {}; configuration: {})",
+			"incremental invalidation: {}; native name sort: {}; configuration: {})",
 			g_enableInventoryEnumeration ? "enabled" : "disabled",
 			g_validateInventoryEnumeration ? "enabled" : "disabled",
 			g_enableIncrementalInvalidation ? "enabled" : "disabled",
+			g_enableNativeNameSort ? "enabled" : "disabled",
 			configStatus);
 	}
 
@@ -57,5 +65,10 @@ namespace Settings
 	bool IsIncrementalInvalidationEnabled()
 	{
 		return g_enableIncrementalInvalidation;
+	}
+
+	bool IsNativeNameSortEnabled()
+	{
+		return g_enableNativeNameSort;
 	}
 }

@@ -15,12 +15,25 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 - Replaces the indexed near-quadratic inventory materializer with one refresh-scoped linear pass. The first sequence in a game session is compared row-for-row with the original implementation before subsequent refreshes rely on it.
 - Separates Scaleform array clearing, per-entry `PushBack`, and `InvalidateListData` from the remaining native materialization and sorting work.
 - Separates native per-entry construction and native sorting from the remaining item-list refresh work.
+- Uses the validated bulk materializer for the object-specific collection path used by partial native rebuilds.
+- Replaces native name quicksort with `std::sort`, retaining the game's name, FormID, descriptor-address, and direction comparisons. Value and weight sorting retain their original tie ordering.
+- Reports topology capture and best-in-class candidate evaluation separately.
 
 ## Native inventory enumeration
 
 `bEnableInventoryEnumeration=1` builds the complete logical inventory-row sequence once per `RefreshItemList` call and serves the game's indexed requests from that sequence. It preserves base-container order, duplicate CNTO aggregation, change-only entries, split stacks, residual aggregate stacks, leveled-item handling, and the original ExtraDataList pointer order.
 
 `bValidateInventoryEnumeration=1` keeps the correctness guard enabled. The first bulk sequence of each game session is compared against every row produced by the native indexed implementation using the base-object pointer, count, and ordered ExtraDataList pointers. A mismatch is logged and disables bulk enumeration for the rest of the session. The validation refresh intentionally retains the original O(N²) cost; later refreshes use the linear materializer.
+
+The same settings also cover object-specific collection during partial rebuilds. Each collection uses a fresh session, returns newly owned descriptors for the first contiguous matching run, and releases skipped descriptors. Its requests and elapsed time appear under `enumeration`, with `bulk/object` identifying the optimized path.
+
+## Native name sorting
+
+`bEnableNativeNameSort=1` replaces the first-element-pivot quicksort used by name sorting with `std::sort`. The native algorithm degenerates on the nearly sorted list retained by partial updates. The replacement has an O(N log N) worst-case comparison bound and calls the original comparator, including its tie breakers and ascending/descending flag.
+
+SE retains the name-sort wrapper's array clearing, repopulation, and `updatePending` transition. AE retains the engine wrapper and replaces only its sort call. Both paths operate before the vanilla or SkyUI frontend refresh. Value and weight sorting are unchanged because their comparators allow distinct entries to compare equal. Disabling this setting restores original name sorting. The log reports `bounded/name` when the replacement runs.
+
+Verified call sites and remaining native work are documented in [Native refresh](docs/NativeRefresh.md).
 
 ## Incremental invalidation
 
@@ -97,5 +110,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.5.3`
+- Version: `0.6.0`
 - Author: `Jiaye`
