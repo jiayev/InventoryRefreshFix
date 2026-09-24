@@ -2,6 +2,7 @@
 
 #include "InventoryEnumeration.h"
 #include "Settings.h"
+#include "Runtime.h"
 #include "pch.h"
 
 #include <algorithm>
@@ -157,7 +158,7 @@ namespace InventoryMenuHook
 			}
 
 			const auto result = value.GetUInt();
-			if (result > std::numeric_limits<std::uint32_t>::max()) {
+			if (result > (std::numeric_limits<std::uint32_t>::max)()) {
 				return false;
 			}
 
@@ -172,12 +173,12 @@ namespace InventoryMenuHook
 			a_profile.itemTopologyCaptured = false;
 			a_profile.scaleformEntriesCaptured = false;
 
-			if (!a_menu || !a_menu->itemList) {
+			if (!a_menu || !a_menu->GetRuntimeData().itemList) {
 				return;
 			}
 
-			const auto& items = a_menu->itemList->items;
-			const auto& entryList = a_menu->itemList->entryList;
+			const auto& items = a_menu->GetRuntimeData().itemList->items;
+			const auto& entryList = a_menu->GetRuntimeData().itemList->entryList;
 			if (!entryList.IsArray()) {
 				return;
 			}
@@ -216,13 +217,13 @@ namespace InventoryMenuHook
 
 		bool HasMatchingItemTopology(RefreshProfile& a_profile)
 		{
-			if (!a_profile.itemTopologyCaptured || !a_profile.menu || !a_profile.menu->itemList) {
+			if (!a_profile.itemTopologyCaptured || !a_profile.menu || !a_profile.menu->GetRuntimeData().itemList) {
 				a_profile.incrementalInvalidationStatus = "full/no topology snapshot";
 				return false;
 			}
 
-			const auto& items = a_profile.menu->itemList->items;
-			const auto& entryList = a_profile.menu->itemList->entryList;
+			const auto& items = a_profile.menu->GetRuntimeData().itemList->items;
+			const auto& entryList = a_profile.menu->GetRuntimeData().itemList->entryList;
 			if (!entryList.IsArray() || items.size() != a_profile.itemTopology.size() ||
 			    entryList.GetArraySize() != items.size()) {
 				a_profile.incrementalInvalidationStatus = "full/item count changed";
@@ -396,11 +397,11 @@ namespace InventoryMenuHook
 
 		bool EnsureSkyUIEntrySnapshots(RefreshProfile& a_profile)
 		{
-			if (!a_profile.menu || !a_profile.menu->itemList) {
+			if (!a_profile.menu || !a_profile.menu->GetRuntimeData().itemList) {
 				return false;
 			}
 
-			auto* itemList = a_profile.menu->itemList;
+			auto* itemList = a_profile.menu->GetRuntimeData().itemList;
 			RE::GFxValue dataProcessors;
 			RE::GFxValue listEnumeration;
 			if (!itemList->root.GetMember("_dataProcessors", std::addressof(dataProcessors)) ||
@@ -439,7 +440,7 @@ namespace InventoryMenuHook
 		{
 			a_profile.scaleformChangedIndices.clear();
 			a_profile.usedScaleformPositionFallback = false;
-			auto* itemList = a_profile.menu->itemList;
+			auto* itemList = a_profile.menu->GetRuntimeData().itemList;
 			RE::GFxValue dataProcessors;
 			RE::GFxValue listEnumeration;
 			if (!itemList->root.GetMember("_dataProcessors", std::addressof(dataProcessors)) ||
@@ -631,7 +632,7 @@ namespace InventoryMenuHook
 			RefreshProfile& a_profile,
 			const RE::GFxValue& a_dataProcessors)
 		{
-			auto* itemList = a_profile.menu->itemList;
+			auto* itemList = a_profile.menu->GetRuntimeData().itemList;
 			auto& entryList = itemList->entryList;
 			if (a_dataProcessors.GetArraySize() != 3) {
 				a_profile.incrementalInvalidationStatus = "full/unsupported SkyUI processors";
@@ -780,7 +781,7 @@ namespace InventoryMenuHook
 
 			// Data processors may update entries the native refresh did not replace. Snapshot
 			// every member that controls filter membership or ordering before running them.
-			const auto entryCount = a_profile.menu->itemList->entryList.GetArraySize();
+			const auto entryCount = a_profile.menu->GetRuntimeData().itemList->entryList.GetArraySize();
 			a_snapshot.entryMembers.resize(entryCount);
 			for (std::uint32_t index = 0; index < entryCount; ++index) {
 				if (index >= a_profile.scaleformPreviousIndices.size()) {
@@ -811,7 +812,7 @@ namespace InventoryMenuHook
 			const RefreshProfile& a_profile,
 			const SkyUIEnumerationSnapshot& a_snapshot)
 		{
-			const auto& entryList = a_profile.menu->itemList->entryList;
+			const auto& entryList = a_profile.menu->GetRuntimeData().itemList->entryList;
 			if (entryList.GetArraySize() != a_snapshot.entryMembers.size()) {
 				return false;
 			}
@@ -851,7 +852,7 @@ namespace InventoryMenuHook
 			}
 
 			const auto started = std::chrono::steady_clock::now();
-			auto& entryList = a_profile.menu->itemList->entryList;
+			auto& entryList = a_profile.menu->GetRuntimeData().itemList->entryList;
 			// FilteredEnumeration retains object references from its previous invalidation.
 			// Translate each old entry index through the cache match before replacing it.
 			std::vector<std::size_t> currentIndicesByPrevious(
@@ -901,7 +902,7 @@ namespace InventoryMenuHook
 			}
 
 			auto* menu = a_profile.menu;
-			auto* itemList = menu->itemList;
+			auto* itemList = menu->GetRuntimeData().itemList;
 			if (!menu->uiMovie) {
 				a_profile.incrementalInvalidationStatus = "full/movie unavailable";
 				return false;
@@ -925,8 +926,8 @@ namespace InventoryMenuHook
 				a_profile.incrementalInvalidationStatus = "full/unsupported SkyUI incremental state";
 				return false;
 			}
-			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
-			    !menu->root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
+			if (!menu->GetRuntimeData().root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
+			    !menu->GetRuntimeData().root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
 				a_profile.incrementalInvalidationStatus = "full/inventory lists unavailable";
 				return false;
 			}
@@ -1028,7 +1029,7 @@ namespace InventoryMenuHook
 			}
 
 			auto* menu = a_profile.menu;
-			auto* itemList = menu->itemList;
+			auto* itemList = menu->GetRuntimeData().itemList;
 			if (!menu->uiMovie || !itemList->root.IsDisplayObject()) {
 				a_profile.incrementalInvalidationStatus = "full/movie unavailable";
 				return false;
@@ -1040,8 +1041,8 @@ namespace InventoryMenuHook
 			RE::GFxValue inventoryLists;
 			RE::GFxValue currentState;
 			RE::GFxValue selectedIndex;
-			if (!menu->root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
-			    !menu->root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
+			if (!menu->GetRuntimeData().root.GetMember("InventoryLists_mc", std::addressof(inventoryLists)) &&
+			    !menu->GetRuntimeData().root.GetMember("inventoryLists", std::addressof(inventoryLists))) {
 				a_profile.incrementalInvalidationStatus = "full/inventory lists unavailable";
 				return false;
 			}
@@ -1148,7 +1149,7 @@ namespace InventoryMenuHook
 			const std::chrono::steady_clock::duration a_elapsed,
 			const RefreshProfile& a_profile)
 		{
-			const auto itemCount = a_menu && a_menu->itemList ? a_menu->itemList->items.size() : 0;
+			const auto itemCount = a_menu && a_menu->GetRuntimeData().itemList ? a_menu->GetRuntimeData().itemList->items.size() : 0;
 			const auto elapsedMilliseconds = std::chrono::duration<double, std::milli>(a_elapsed).count();
 			const auto enumerationMilliseconds =
 				std::chrono::duration<double, std::milli>(a_profile.enumerationTime).count();
@@ -1278,7 +1279,7 @@ namespace InventoryMenuHook
 			{
 				const auto started = std::chrono::steady_clock::now();
 				if (g_activeRefreshProfile) {
-					g_activeRefreshProfile->nativeFullRebuild = a_menu && a_menu->pendingUpdateObjects.empty();
+					g_activeRefreshProfile->nativeFullRebuild = a_menu && a_menu->GetRuntimeData().pendingUpdateObjects.empty();
 				}
 				if (g_activeRefreshProfile && g_activeRefreshProfile->allowIncrementalInvalidation) {
 					const auto captureStarted = std::chrono::steady_clock::now();
@@ -1312,7 +1313,7 @@ namespace InventoryMenuHook
 				}
 			}
 
-			static bool Install()
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_InventoryMenu[0] };
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
@@ -1322,30 +1323,16 @@ namespace InventoryMenuHook
 				const auto dispatchedProcessMessage =
 					*reinterpret_cast<const std::uintptr_t*>(vtable.address() + 4 * sizeof(std::uintptr_t));
 
-#ifdef SKYRIM_SUPPORT_AE
-				REL::Relocation<std::uintptr_t> processMessage{ REL::Offset(0x92C5D0) };
-				constexpr std::ptrdiff_t kOpenItemListOffset = 0x21B;
-				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x223;
-				constexpr std::ptrdiff_t kFullItemListOffset = 0xB2B;
-				constexpr std::ptrdiff_t kFullBottomBarOffset = 0xB33;
-				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0xB5D;
-#else
-				REL::Relocation<std::uintptr_t> processMessage{ REL::Offset(0x88D1F0) };
-				constexpr std::ptrdiff_t kOpenItemListOffset = 0x134;
-				constexpr std::ptrdiff_t kOpenBottomBarOffset = 0x13C;
-				constexpr std::ptrdiff_t kFullItemListOffset = 0x785;
-				constexpr std::ptrdiff_t kFullBottomBarOffset = 0x78D;
-				constexpr std::ptrdiff_t kFullPlayer3DOffset = 0x7B7;
-#endif
+				REL::Relocation<std::uintptr_t> processMessage{ REL::ID(a_offsets.processMessageID) };
 				if (dispatchedProcessMessage != processMessage.address()) {
 					SKSE::log::info("InventoryMenu::ProcessMessage was already redirected; using native refresh call sites");
 				}
 
-				const auto openItemListCall = processMessage.address() + kOpenItemListOffset;
-				const auto openBottomBarCall = processMessage.address() + kOpenBottomBarOffset;
-				const auto fullItemListCall = processMessage.address() + kFullItemListOffset;
-				const auto fullBottomBarCall = processMessage.address() + kFullBottomBarOffset;
-				const auto fullPlayer3DCall = processMessage.address() + kFullPlayer3DOffset;
+				const auto openItemListCall = processMessage.address() + a_offsets.refreshCalls[0];
+				const auto openBottomBarCall = processMessage.address() + a_offsets.refreshCalls[1];
+				const auto fullItemListCall = processMessage.address() + a_offsets.refreshCalls[2];
+				const auto fullBottomBarCall = processMessage.address() + a_offsets.refreshCalls[3];
+				const auto fullPlayer3DCall = processMessage.address() + a_offsets.refreshCalls[4];
 
 				if (GetCallTarget(openItemListCall) != refreshItemList.address() ||
 				    GetCallTarget(fullItemListCall) != refreshItemList.address() ||
@@ -1422,15 +1409,14 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-#ifdef SKYRIM_SUPPORT_AE
-			static void InvalidateThunk(
+			static void InvalidateAEThunk(
 				RE::GFxMovieView* a_movieView,
 				const char* a_methodName,
 				RE::FxResponseArgsBase& a_args)
 			{
 				auto* profile = g_activeRefreshProfile;
 				if (!profile) {
-					return _invalidateOriginal(a_movieView, a_methodName, a_args);
+					return _invalidateAEOriginal(a_movieView, a_methodName, a_args);
 				}
 
 				const auto started = std::chrono::steady_clock::now();
@@ -1438,64 +1424,46 @@ namespace InventoryMenuHook
 					if (Settings::IsIncrementalInvalidationEnabled()) {
 						EnsureSkyUIEntrySnapshots(*profile);
 					}
-					_invalidateOriginal(a_movieView, a_methodName, a_args);
+					_invalidateAEOriginal(a_movieView, a_methodName, a_args);
 				}
-#else
-			static void InvalidateThunk(RE::ItemList* a_itemList)
-			{
-				auto* profile = g_activeRefreshProfile;
-				if (!profile) {
-					return _invalidateOriginal(a_itemList);
-				}
-
-				const auto started = std::chrono::steady_clock::now();
-				if (!TryIncrementalInvalidation(*profile)) {
-					if (Settings::IsIncrementalInvalidationEnabled()) {
-						EnsureSkyUIEntrySnapshots(*profile);
-					}
-					_invalidateOriginal(a_itemList);
-				}
-#endif
 
 				profile->scaleformInvalidateTime += std::chrono::steady_clock::now() - started;
 			}
 
-			static bool Install()
+			static void InvalidateSEThunk(RE::ItemList* a_itemList)
+			{
+				auto* profile = g_activeRefreshProfile;
+				if (!profile) {
+					return _invalidateSEOriginal(a_itemList);
+				}
+
+				const auto started = std::chrono::steady_clock::now();
+				if (!TryIncrementalInvalidation(*profile)) {
+					if (Settings::IsIncrementalInvalidationEnabled()) {
+						EnsureSkyUIEntrySnapshots(*profile);
+					}
+					_invalidateSEOriginal(a_itemList);
+				}
+
+				profile->scaleformInvalidateTime += std::chrono::steady_clock::now() - started;
+			}
+
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
 				REL::Relocation<std::uintptr_t> removeElements{ RELOCATION_ID(80252, 82280) };
 				REL::Relocation<std::uintptr_t> pushBack{ RELOCATION_ID(80248, 82273) };
 
-#ifdef SKYRIM_SUPPORT_AE
-				const std::array removeCalls{
-					refreshItemList.address() + 0x190,
-					refreshItemList.address() + 0x218,
-					refreshItemList.address() + 0x2F6
-				};
-				const std::array pushCalls{
-					refreshItemList.address() + 0x1EE,
-					refreshItemList.address() + 0x2CC,
-					refreshItemList.address() + 0x3A0
-				};
-				const auto invalidateCall = refreshItemList.address() + 0x452;
-				REL::Relocation<std::uintptr_t> invalidate{ REL::Offset(0xFBE900) };
-#else
-				const auto sortName = GetCallTarget(refreshItemList.address() + 0x65);
-				const auto sortValue = GetCallTarget(refreshItemList.address() + 0x83);
-				const auto sortWeight = GetCallTarget(refreshItemList.address() + 0xA1);
-				const std::array removeCalls{
-					sortName + 0x27,
-					sortValue + 0x27,
-					sortWeight + 0x27
-				};
-				const std::array pushCalls{
-					sortName + 0xBF,
-					sortValue + 0xFF,
-					sortWeight + 0xFF
-				};
-				const auto invalidateCall = refreshItemList.address() + 0x11B;
-				REL::Relocation<std::uintptr_t> invalidate{ REL::Offset(0x8568D0) };
-#endif
+				std::array<std::uintptr_t, 3> removeCalls;
+				std::array<std::uintptr_t, 3> pushCalls;
+				for (std::size_t i = 0; i < removeCalls.size(); ++i) {
+					const auto base = a_offsets.anniversaryEdition ?
+						refreshItemList.address() : REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.sortTargetIDs[i]) }.address();
+					removeCalls[i] = base + a_offsets.clearCalls[i];
+					pushCalls[i] = base + a_offsets.pushCalls[i];
+				}
+				const auto invalidateCall = refreshItemList.address() + a_offsets.invalidateCall;
+				REL::Relocation<std::uintptr_t> invalidate{ REL::ID(a_offsets.invalidateID) };
 
 				for (const auto call : removeCalls) {
 					if (GetCallTarget(call) != removeElements.address()) {
@@ -1536,21 +1504,24 @@ namespace InventoryMenuHook
 					}
 				}
 
-				_invalidateOriginal = reinterpret_cast<Invalidate_t>(
-					trampoline.write_call<5>(invalidateCall, InvalidateThunk));
+				if (a_offsets.anniversaryEdition) {
+					_invalidateAEOriginal = reinterpret_cast<InvalidateAE_t>(
+						trampoline.write_call<5>(invalidateCall, InvalidateAEThunk));
+				} else {
+					_invalidateSEOriginal = reinterpret_cast<InvalidateSE_t>(
+						trampoline.write_call<5>(invalidateCall, InvalidateSEThunk));
+				}
 				return true;
 			}
 
 		private:
-#ifdef SKYRIM_SUPPORT_AE
-			using Invalidate_t = void (*)(RE::GFxMovieView*, const char*, RE::FxResponseArgsBase&);
-#else
-			using Invalidate_t = void (*)(RE::ItemList*);
-#endif
+			using InvalidateAE_t = void (*)(RE::GFxMovieView*, const char*, RE::FxResponseArgsBase&);
+			using InvalidateSE_t = void (*)(RE::ItemList*);
 
 			static inline RemoveElements_t _removeElementsOriginal = nullptr;
 			static inline PushBack_t _pushBackOriginal = nullptr;
-			static inline Invalidate_t _invalidateOriginal = nullptr;
+			static inline InvalidateAE_t _invalidateAEOriginal = nullptr;
+			static inline InvalidateSE_t _invalidateSEOriginal = nullptr;
 		};
 
 		class NativeItemConstructionHook
@@ -1574,22 +1545,14 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-			static bool Install()
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
-#ifdef SKYRIM_SUPPORT_AE
-				REL::Relocation<std::uintptr_t> addItem{ REL::Offset(0x8EF050) };
+				REL::Relocation<std::uintptr_t> addItem{ REL::ID(a_offsets.addItemID) };
 				const std::array calls{
-					refreshItemList.address() + 0xEC,
-					refreshItemList.address() + 0x779
+					refreshItemList.address() + a_offsets.addItemCalls[0],
+					refreshItemList.address() + a_offsets.addItemCalls[1]
 				};
-#else
-				REL::Relocation<std::uintptr_t> addItem{ REL::Offset(0x856050) };
-				const std::array calls{
-					refreshItemList.address() + 0x8CE,
-					refreshItemList.address() + 0xA0C
-				};
-#endif
 
 				for (const auto call : calls) {
 					if (GetCallTarget(call) != addItem.address()) {
@@ -1619,69 +1582,48 @@ namespace InventoryMenuHook
 		class NativeSortHook
 		{
 		public:
-#ifdef SKYRIM_SUPPORT_AE
-			using Sort_t = void (*)(void*, void*, std::uint32_t, std::uint32_t);
+			using SortSE_t = void (*)(RE::ItemList*, void*);
+			using SortAE_t = void (*)(void*, void*, std::uint32_t, std::uint32_t);
 
-			static void Thunk0(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
+			static void AEThunk0(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
 			{
-				Invoke(0, a_items, a_comparator, a_first, a_last);
+				InvokeAE(0, a_items, a_comparator, a_first, a_last);
 			}
 
-			static void Thunk1(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
+			static void AEThunk1(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
 			{
-				Invoke(1, a_items, a_comparator, a_first, a_last);
+				InvokeAE(1, a_items, a_comparator, a_first, a_last);
 			}
 
-			static void Thunk2(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
+			static void AEThunk2(void* a_items, void* a_comparator, std::uint32_t a_first, std::uint32_t a_last)
 			{
-				Invoke(2, a_items, a_comparator, a_first, a_last);
-			}
-#else
-			using Sort_t = void (*)(RE::ItemList*, void*);
-
-			static void Thunk0(RE::ItemList* a_itemList, void* a_comparator)
-			{
-				Invoke(0, a_itemList, a_comparator);
+				InvokeAE(2, a_items, a_comparator, a_first, a_last);
 			}
 
-			static void Thunk1(RE::ItemList* a_itemList, void* a_comparator)
+			static void SEThunk0(RE::ItemList* a_itemList, void* a_comparator)
 			{
-				Invoke(1, a_itemList, a_comparator);
+				InvokeSE(0, a_itemList, a_comparator);
 			}
 
-			static void Thunk2(RE::ItemList* a_itemList, void* a_comparator)
+			static void SEThunk1(RE::ItemList* a_itemList, void* a_comparator)
 			{
-				Invoke(2, a_itemList, a_comparator);
+				InvokeSE(1, a_itemList, a_comparator);
 			}
-#endif
 
-			static bool Install()
+			static void SEThunk2(RE::ItemList* a_itemList, void* a_comparator)
+			{
+				InvokeSE(2, a_itemList, a_comparator);
+			}
+
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
-#ifdef SKYRIM_SUPPORT_AE
-				const std::array calls{
-					refreshItemList.address() + 0x1AF,
-					refreshItemList.address() + 0x286,
-					refreshItemList.address() + 0x365
-				};
-				const std::array expectedTargets{
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x8ED5A0) }.address(),
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x8ED320) }.address(),
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x8ED460) }.address()
-				};
-#else
-				const std::array calls{
-					refreshItemList.address() + 0x65,
-					refreshItemList.address() + 0x83,
-					refreshItemList.address() + 0xA1
-				};
-				const std::array expectedTargets{
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x854970) }.address(),
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x8546F0) }.address(),
-					REL::Relocation<std::uintptr_t>{ REL::Offset(0x854830) }.address()
-				};
-#endif
-				const std::array<Sort_t, 3> thunks{ Thunk0, Thunk1, Thunk2 };
+				std::array<std::uintptr_t, 3> calls;
+				std::array<std::uintptr_t, 3> expectedTargets;
+				for (std::size_t i = 0; i < calls.size(); ++i) {
+					calls[i] = refreshItemList.address() + a_offsets.sortCalls[i];
+					expectedTargets[i] = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.sortTargetIDs[i]) }.address();
+				}
 
 				for (std::size_t i = 0; i < calls.size(); ++i) {
 					if (GetCallTarget(calls[i]) != expectedTargets[i]) {
@@ -1690,23 +1632,21 @@ namespace InventoryMenuHook
 					}
 				}
 
-#ifdef SKYRIM_SUPPORT_AE
-				const auto comparator = REL::Relocation<std::uintptr_t>{ REL::Offset(0x929B20) }.address();
-				const auto firstCompare = expectedTargets[0] + 0x70;
-				const auto secondCompare = expectedTargets[0] + 0xFF;
-#else
-				const auto comparator = REL::Relocation<std::uintptr_t>{ REL::Offset(0x889E60) }.address();
-				const auto partition = REL::Relocation<std::uintptr_t>{ REL::Offset(0x854100) }.address();
-				const auto firstCompare = partition + 0x4F;
-				const auto secondCompare = partition + 0xAD;
-				const auto recurse = REL::Relocation<std::uintptr_t>{ REL::Offset(0x854300) }.address();
-				if (GetCallTarget(expectedTargets[0] + 0x46) != partition ||
-				    GetCallTarget(expectedTargets[0] + 0x5F) != recurse ||
-				    GetCallTarget(expectedTargets[0] + 0x7B) != recurse) {
-					SKSE::log::critical("Native name-sort body validation failed; sort hook disabled");
-					return false;
+				const auto comparator = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.nameComparatorID) }.address();
+				auto compareBase = expectedTargets[0];
+				if (!a_offsets.anniversaryEdition) {
+					const auto partition = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.namePartitionID) }.address();
+					const auto recurse = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.nameRecurseID) }.address();
+					if (GetCallTarget(expectedTargets[0] + 0x46) != partition ||
+					    GetCallTarget(expectedTargets[0] + 0x5F) != recurse ||
+					    GetCallTarget(expectedTargets[0] + 0x7B) != recurse) {
+						SKSE::log::critical("Native name-sort body validation failed; sort hook disabled");
+						return false;
+					}
+					compareBase = partition;
 				}
-#endif
+				const auto firstCompare = compareBase + a_offsets.nameCompareCalls[0];
+				const auto secondCompare = compareBase + a_offsets.nameCompareCalls[1];
 				if (GetCallTarget(firstCompare) == comparator && GetCallTarget(secondCompare) == comparator) {
 					_nameComparator = reinterpret_cast<Compare_t>(comparator);
 				} else {
@@ -1714,8 +1654,14 @@ namespace InventoryMenuHook
 				}
 
 				auto& trampoline = SKSE::GetTrampoline();
+				const std::array<SortAE_t, 3> aeThunks{ AEThunk0, AEThunk1, AEThunk2 };
+				const std::array<SortSE_t, 3> seThunks{ SEThunk0, SEThunk1, SEThunk2 };
 				for (std::size_t i = 0; i < calls.size(); ++i) {
-					_originals[i] = reinterpret_cast<Sort_t>(trampoline.write_call<5>(calls[i], thunks[i]));
+					if (a_offsets.anniversaryEdition) {
+						_originalsAE[i] = reinterpret_cast<SortAE_t>(trampoline.write_call<5>(calls[i], aeThunks[i]));
+					} else {
+						_originalsSE[i] = reinterpret_cast<SortSE_t>(trampoline.write_call<5>(calls[i], seThunks[i]));
+					}
 				}
 
 				return true;
@@ -1728,8 +1674,8 @@ namespace InventoryMenuHook
 			{
 				const auto* profile = g_activeRefreshProfile;
 				return _nameComparator && Settings::IsNativeNameSortEnabled() && a_comparator &&
-				       profile && profile->menu && profile->menu->itemList &&
-				       a_items == std::addressof(profile->menu->itemList->items);
+				       profile && profile->menu && profile->menu->GetRuntimeData().itemList &&
+				       a_items == std::addressof(profile->menu->GetRuntimeData().itemList->items);
 			}
 
 			static void SortName(RE::BSTArray<RE::ItemList::Item*>& a_items, void* a_comparator)
@@ -1742,7 +1688,6 @@ namespace InventoryMenuHook
 				g_activeRefreshProfile->nativeSortStatus = "bounded/name";
 			}
 
-#ifndef SKYRIM_SUPPORT_AE
 			static void RebuildNameOrder(RE::ItemList& a_list, void* a_comparator)
 			{
 				auto* profile = g_activeRefreshProfile;
@@ -1760,10 +1705,8 @@ namespace InventoryMenuHook
 				profile->scaleformPushTime += std::chrono::steady_clock::now() - started;
 				a_list.updatePending = false;
 			}
-#endif
 
-#ifdef SKYRIM_SUPPORT_AE
-			static void Invoke(
+			static void InvokeAE(
 				std::size_t a_index,
 				void* a_items,
 				void* a_comparator,
@@ -1779,10 +1722,17 @@ namespace InventoryMenuHook
 				    a_first == 0 && items->size() > 1 && a_last == items->size() - 1) {
 					SortName(*items, a_comparator);
 				} else {
-					_originals[a_index](a_items, a_comparator, a_first, a_last);
+					_originalsAE[a_index](a_items, a_comparator, a_first, a_last);
 				}
-#else
-			static void Invoke(std::size_t a_index, RE::ItemList* a_itemList, void* a_comparator)
+				if (profile) {
+					const auto elapsed = std::chrono::steady_clock::now() - started;
+					const auto nestedScaleformTime =
+						(profile->scaleformClearTime - clearBefore) + (profile->scaleformPushTime - pushBefore);
+					profile->nativeSortTime += elapsed - nestedScaleformTime;
+				}
+			}
+
+			static void InvokeSE(std::size_t a_index, RE::ItemList* a_itemList, void* a_comparator)
 			{
 				auto* profile = g_activeRefreshProfile;
 				const auto clearBefore = profile ? profile->scaleformClearTime : std::chrono::steady_clock::duration{};
@@ -1792,9 +1742,9 @@ namespace InventoryMenuHook
 				    CanSortName(std::addressof(a_itemList->items), a_comparator)) {
 					RebuildNameOrder(*a_itemList, a_comparator);
 				} else {
-					_originals[a_index](a_itemList, a_comparator);
+					_originalsSE[a_index](a_itemList, a_comparator);
 				}
-#endif
+
 				if (profile) {
 					const auto elapsed = std::chrono::steady_clock::now() - started;
 					const auto nestedScaleformTime =
@@ -1803,7 +1753,8 @@ namespace InventoryMenuHook
 				}
 			}
 
-			static inline std::array<Sort_t, 3> _originals{};
+			static inline std::array<SortAE_t, 3> _originalsAE{};
+			static inline std::array<SortSE_t, 3> _originalsSE{};
 			static inline Compare_t _nameComparator = nullptr;
 		};
 
@@ -1854,19 +1805,13 @@ namespace InventoryMenuHook
 				profile->enumerationTime += std::chrono::steady_clock::now() - started;
 			}
 
-			static bool Install()
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
 				REL::Relocation<std::uintptr_t> getInventoryItemAt{ RELOCATION_ID(15866, 16106) };
-#ifdef SKYRIM_SUPPORT_AE
-				const auto call = refreshItemList.address() + 0x732;
-				const auto collect = REL::Relocation<std::uintptr_t>{ REL::Offset(0x233CA0) }.address();
-				const auto loopCall = collect + 0xBF;
-#else
-				const auto call = refreshItemList.address() + 0x9C1;
-				const auto collect = REL::Relocation<std::uintptr_t>{ REL::Offset(0x1E7210) }.address();
-				const auto loopCall = collect + 0xC7;
-#endif
+				const auto call = refreshItemList.address() + a_offsets.collectCall;
+				const auto collect = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.collectID) }.address();
+				const auto loopCall = collect + a_offsets.collectLoopCall;
 				const std::array<std::uint8_t, 3> prologue{ 0x48, 0x85, 0xD2 };
 				if (GetCallTarget(call) != collect ||
 				    std::memcmp(reinterpret_cast<const void*>(collect), prologue.data(), prologue.size()) != 0 ||
@@ -1902,16 +1847,11 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-			static bool Install()
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
-#ifdef SKYRIM_SUPPORT_AE
-				const auto call = refreshItemList.address() + 0x3E8;
-				const auto visit = REL::Relocation<std::uintptr_t>{ REL::Offset(0x92B7F0) }.address();
-#else
-				const auto call = refreshItemList.address() + 0xFA;
-				const auto visit = REL::Relocation<std::uintptr_t>{ REL::Offset(0x88C4A0) }.address();
-#endif
+				const auto call = refreshItemList.address() + a_offsets.bestInClassCall;
+				const auto visit = REL::Relocation<std::uintptr_t>{ REL::ID(a_offsets.bestInClassID) }.address();
 				if (GetCallTarget(call) != visit) {
 					SKSE::log::critical("Best-in-class call-site validation failed; profiling disabled");
 					return false;
@@ -1949,21 +1889,14 @@ namespace InventoryMenuHook
 				return result;
 			}
 
-			static bool Install()
+			static bool Install(const Runtime::HookOffsets& a_offsets)
 			{
 				REL::Relocation<std::uintptr_t> refreshItemList{ RELOCATION_ID(50987, 51866) };
 				REL::Relocation<std::uintptr_t> getInventoryItemAt{ RELOCATION_ID(15866, 16106) };
 
-#ifdef SKYRIM_SUPPORT_AE
-				constexpr std::ptrdiff_t kFirstCallOffset = 0xC1;
-				constexpr std::ptrdiff_t kLoopCallOffset = 0x11E;
-#else
-				constexpr std::ptrdiff_t kFirstCallOffset = 0x8A5;
-				constexpr std::ptrdiff_t kLoopCallOffset = 0x900;
-#endif
 
-				const auto firstCall = refreshItemList.address() + kFirstCallOffset;
-				const auto loopCall = refreshItemList.address() + kLoopCallOffset;
+				const auto firstCall = refreshItemList.address() + a_offsets.enumerationCalls[0];
+				const auto loopCall = refreshItemList.address() + a_offsets.enumerationCalls[1];
 				if (GetCallTarget(firstCall) != getInventoryItemAt.address() ||
 					GetCallTarget(loopCall) != getInventoryItemAt.address()) {
 					SKSE::log::critical("Inventory enumeration call-site validation failed; bulk enumeration disabled");
@@ -2033,14 +1966,18 @@ namespace InventoryMenuHook
 
 	void Install()
 	{
-		SKSE::AllocTrampoline(1024);
-		const auto phaseProfilingInstalled = RefreshPhaseHook::Install();
-		const auto scaleformProfilingInstalled = ScaleformListHook::Install();
-		const auto nativeItemConstructionInstalled = NativeItemConstructionHook::Install();
-		const auto nativeSortInstalled = NativeSortHook::Install();
-		const auto inventoryEnumerationInstalled = InventoryEnumerationHook::Install();
-		const auto objectEnumerationInstalled = ObjectEnumerationHook::Install();
-		const auto bestInClassInstalled = BestInClassHook::Install();
+		const auto* offsets = Runtime::GetHookOffsets(REL::Module::get().version());
+		if (!offsets) {
+			SKSE::log::critical("No supported inventory hook profile; installation skipped");
+			return;
+		}
+		const auto phaseProfilingInstalled = RefreshPhaseHook::Install(*offsets);
+		const auto scaleformProfilingInstalled = ScaleformListHook::Install(*offsets);
+		const auto nativeItemConstructionInstalled = NativeItemConstructionHook::Install(*offsets);
+		const auto nativeSortInstalled = NativeSortHook::Install(*offsets);
+		const auto inventoryEnumerationInstalled = InventoryEnumerationHook::Install(*offsets);
+		const auto objectEnumerationInstalled = ObjectEnumerationHook::Install(*offsets);
+		const auto bestInClassInstalled = BestInClassHook::Install(*offsets);
 		const auto processMessageInstalled = ProcessMessageHook::Install();
 		SKSE::log::info(
 			"Inventory hooks installed (refresh phases: {}; Scaleform list: {}; "

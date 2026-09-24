@@ -240,7 +240,7 @@ namespace InventoryEnumeration
 					}
 					if (count > 0 && !Append({
 						a_entry.object,
-						std::min(count, a_maximumRowCount),
+						(std::min)(count, a_maximumRowCount),
 						{ extraList }
 					})) {
 						return false;
@@ -333,7 +333,7 @@ namespace InventoryEnumeration
 					a_entry,
 					nonStackableCount,
 					true,
-					std::numeric_limits<std::int32_t>::max())) {
+					(std::numeric_limits<std::int32_t>::max)())) {
 				return false;
 			}
 

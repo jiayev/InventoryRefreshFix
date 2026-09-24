@@ -4,7 +4,13 @@ Runtime profiling and safe optimizations for Skyrim's expensive full inventory-l
 
 The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu or rebuilds the complete Scaleform item list. Each log entry separates item-list rebuilding, indexed inventory materialization, bottom-bar updates, player 3D rebuilding, and other message-handling work.
 
-`lib/commonlibsse` is pinned to [`1066ead`](https://github.com/jiayev/CommonLibSSE/commit/1066ead1b), which contains the inventory-specific refresh and materialization APIs based on CommonLibSSE `dev`.
+`lib/commonlibsse` tracks the `ng` branch of [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) and is pinned to [`736dc640`](https://github.com/alandtse/CommonLibSSE-NG/commit/736dc64094e59232abfbcdf796cd0a063e136ec6) (9.0.1). This revision includes the inventory-specific refresh and materialization APIs.
+
+## Runtime support
+
+One DLL handles SE 1.5.97 and AE 1.6.1170 using separate hook signatures selected at runtime. GOG 1.6.1179 is enabled with its own Address Library function addresses and the 1.6.1170 call-site layout. Every hook still checks its expected call targets before installation. The GOG path has not yet been verified in-game.
+
+NG already recognizes 1.7.99 and 1.7.104, but this plugin's hook layouts have not been verified on them. They remain disabled, as do other unlisted versions and VR. Building against NG's SE/AE/VR ABI does not enable unsupported hook profiles. See [Runtime profiles](docs/RuntimeProfiles.md).
 
 ## Current scope
 
@@ -45,7 +51,7 @@ Icon and property updates invoke their installed `processList` methods with a te
 
 ### Requirements
 
-* Skyrim SE 1.5.97 or Skyrim AE 1.6.1170
+* Skyrim SE 1.5.97, Skyrim AE 1.6.1170, or GOG 1.6.1179
 * A matching SKSE and Address Library installation
 * [XMake](https://xmake.io) [3.0.0+]
 * C++23 Compiler (MSVC, Clang-CL)
@@ -57,16 +63,10 @@ cd InventoryRefreshFix
 ```
 
 ### Build
-To build the Skyrim SE target, run:
-```bat
-xmake f --skyrim_ae=n
-xmake build
-```
-
-For Skyrim AE 1.6.1170:
+Build one NG DLL with CommonLib's multi-runtime ABI:
 
 ```bat
-xmake f --skyrim_ae=y
+xmake f --skyrim_se=y --skyrim_ae=y --skyrim_vr=y
 xmake build
 ```
 
@@ -76,7 +76,7 @@ xmake build
 .\build-release.ps1
 ```
 
-This creates separately configured SE and AE packages in `release/`.
+This creates one `*-NG.zip` in `release/`, using an isolated `build/NG/output` directory. The release script no longer takes a `-Target` argument.
 
 ### Build Output (Optional)
 If you want to redirect the build output, set one of the following environment variables:
@@ -112,5 +112,5 @@ xmake require --upgrade
 ## Project metadata
 
 - Name: `InventoryRefreshFix`
-- Version: `0.6.1`
+- Version: `0.7.0`
 - Author: `Jiaye`

@@ -9,9 +9,6 @@ namespace Logging
 {
 	bool Initialize()
 	{
-#ifdef SKYRIM_SUPPORT_AE
-		return true;
-#else
 		auto path = SKSE::log::log_directory();
 		if (!path) {
 			return false;
@@ -40,6 +37,5 @@ namespace Logging
 		}
 
 		return true;
-#endif
 	}
 }

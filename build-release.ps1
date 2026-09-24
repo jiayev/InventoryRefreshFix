@@ -1,8 +1,5 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("SE", "AE", "All")]
-    [string]$Target = "All",
-
     [switch]$Clean
 )
 
@@ -45,13 +42,7 @@ function Invoke-XMake {
 $releaseRoot = Get-SafeChildPath -Root $repositoryRoot -Child (Join-Path $repositoryRoot "release")
 
 function Build-And-Package {
-    param(
-        [Parameter(Mandatory)]
-        [ValidateSet("SE", "AE")]
-        [string]$Variant
-    )
-
-    $variantBuildRoot = Get-SafeChildPath -Root $buildRoot -Child (Join-Path $buildRoot $Variant)
+    $variantBuildRoot = Get-SafeChildPath -Root $buildRoot -Child (Join-Path $buildRoot "NG")
     $buildDirectory = Get-SafeChildPath -Root $variantBuildRoot -Child (Join-Path $variantBuildRoot "output")
     $packageDirectory = Get-SafeChildPath -Root $buildDirectory -Child (Join-Path $buildDirectory "packages")
 
@@ -61,8 +52,7 @@ function Build-And-Package {
 
     Push-Location $repositoryRoot
     try {
-        $aeOption = if ($Variant -eq "AE") { "y" } else { "n" }
-        Invoke-XMake @("f", "-o", $buildDirectory, "-m", "releasedbg", "--skyrim_ae=$aeOption")
+        Invoke-XMake @("f", "-o", $buildDirectory, "-m", "releasedbg", "--skyrim_se=y", "--skyrim_ae=y", "--skyrim_vr=y")
         Invoke-XMake @("build")
 
         if (Test-Path -LiteralPath $packageDirectory) {
@@ -84,7 +74,7 @@ function Build-And-Package {
     }
 
     New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
-    $releasePath = Join-Path $releaseRoot ("{0}-{1}.zip" -f $packages[0].BaseName, $Variant)
+    $releasePath = Join-Path $releaseRoot ("{0}-NG.zip" -f $packages[0].BaseName)
     Copy-Item -LiteralPath $packages[0].FullName -Destination $releasePath -Force
 
     return Get-Item -LiteralPath $releasePath
@@ -98,10 +88,7 @@ if ($Clean -and (Test-Path -LiteralPath $releaseRoot)) {
     Remove-Item -LiteralPath $releaseRoot -Recurse -Force
 }
 
-$variants = if ($Target -eq "All") { @("SE", "AE") } else { @($Target) }
-$artifacts = foreach ($variant in $variants) {
-    Build-And-Package -Variant $variant
-}
+$artifacts = @(Build-And-Package)
 
 $checksumPath = Join-Path $releaseRoot "SHA256SUMS.txt"
 $checksumLines = foreach ($artifact in $artifacts | Sort-Object Name) {
