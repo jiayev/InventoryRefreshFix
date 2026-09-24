@@ -7,7 +7,7 @@
 
 namespace
 {
-	constexpr auto kPluginVersion = "0.7.0";
+	constexpr auto kPluginVersion = "0.7.1";
 
 	void OnSKSEMessage(SKSE::MessagingInterface::Message* a_message)
 	{
@@ -28,12 +28,12 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
 	const auto runtime = a_skse->RuntimeVersion();
 	if (!Runtime::GetHookOffsets(runtime)) {
 		SKSE::log::critical(
-			"Unsupported Skyrim runtime {}; no verified inventory hook profile is available",
+			"Unsupported Skyrim runtime {}; no inventory hook profile is available",
 			runtime.string());
 		return false;
 	}
-	if (runtime == SKSE::RUNTIME_SSE_1_6_1179) {
-		SKSE::log::info("GOG runtime: using AE call-site layout with Address Library targets and installation checks");
+	if (runtime.major() == 1 && (runtime.minor() == 6 || runtime.minor() == 7)) {
+		SKSE::log::info("AE runtime: using shared call-site layout verified against 1.6.1170 and 1.7.104; installation checks enabled");
 	}
 
 	SKSE::log::info(

@@ -30,7 +30,7 @@ namespace Runtime
 			.enumerationCalls = { 0x8A5, 0x900 }
 		};
 
-		constexpr HookOffsets kAE161170{
+		constexpr HookOffsets kAE{
 			.anniversaryEdition = true,
 			.processMessageID = 51848,
 			.refreshCalls = { 0x21B, 0x223, 0xB2B, 0xB33, 0xB5D },
@@ -60,8 +60,8 @@ namespace Runtime
 		if (a_version == SKSE::RUNTIME_SSE_1_5_97) {
 			return &kSE1597;
 		}
-		if (a_version == SKSE::RUNTIME_SSE_1_6_1170 || a_version == SKSE::RUNTIME_SSE_1_6_1179) {
-			return &kAE161170;
+		if (a_version.major() == 1 && (a_version.minor() == 6 || a_version.minor() == 7)) {
+			return &kAE;
 		}
 		return nullptr;
 	}

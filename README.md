@@ -8,9 +8,9 @@ The profiler measures the `InventoryMenu` paths used when Skyrim opens the menu 
 
 ## Runtime support
 
-One DLL handles SE 1.5.97 and AE 1.6.1170 using separate hook signatures selected at runtime. GOG 1.6.1179 is enabled with its own Address Library function addresses and the 1.6.1170 call-site layout. Every hook still checks its expected call targets before installation. The GOG path has not yet been verified in-game.
+One DLL enables SE 1.5.97 and all 1.6.x / 1.7.x runtimes, including GOG, using runtime-selected hook profiles. The shared AE call-site layout was checked against 1.6.1170 and 1.7.104; each runtime uses its own Address Library addresses. Call-site hooks check their expected targets before installation. The GOG and 1.7 paths have not yet been verified in-game.
 
-NG already recognizes 1.7.99 and 1.7.104, but this plugin's hook layouts have not been verified on them. They remain disabled, as do other unlisted versions and VR. Building against NG's SE/AE/VR ABI does not enable unsupported hook profiles. See [Runtime profiles](docs/RuntimeProfiles.md).
+There is no patch-version whitelist for 1.6.x or 1.7.x. Versions other than 1.6.1170 and 1.7.104 are enabled on the assumption that this layout remains compatible, not individual executable verification. A matching SKSE and Address Library are still required; a failed call-site check disables the affected hook. Other unlisted versions and VR remain disabled. Building against NG's SE/AE/VR ABI does not enable unsupported hook profiles. See [Runtime profiles](docs/RuntimeProfiles.md).
 
 ## Current scope
 
@@ -51,7 +51,7 @@ Icon and property updates invoke their installed `processList` methods with a te
 
 ### Requirements
 
-* Skyrim SE 1.5.97, Skyrim AE 1.6.1170, or GOG 1.6.1179
+* Skyrim SE 1.5.97 or Skyrim 1.6.x / 1.7.x (including GOG)
 * A matching SKSE and Address Library installation
 * [XMake](https://xmake.io) [3.0.0+]
 * C++23 Compiler (MSVC, Clang-CL)
